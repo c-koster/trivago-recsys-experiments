@@ -34,7 +34,7 @@ import numpy as np
 # fancy python styling and error bars
 from typing import Dict, List, Set, Optional, Any, Tuple
 from tqdm import tqdm
-from dataclasses import dataclass
+from dataclasses import dataclass, field, default_factory
 
 
 # First define classes to make handling data a little easier.
@@ -69,11 +69,12 @@ class UserProfile:
 # this one is a wrapper for training and test data types
 @dataclass
 class SessionData:
-    Xs: List[Dict[str,str]]
-    ys: List[bool]
+    name: str
+    examples: List[Dict[str, Session]] = field(default_factory=list)
+    labels: List[int] = field(default_factory=list)
+    session_ids: List[str] = field(default_factory=list)
 
 
-# and functions
 
 def create_session(df: List[Dict[str,str]]) -> Session:
     """
@@ -96,14 +97,14 @@ def create_session(df: List[Dict[str,str]]) -> Session:
 
 def extract_features(x: int) -> None:
     """
-
+    i would also like to know what this function does
     """
-    pass
+    return
 
-def collect(what: str) -> SessionData:
+
+def collect(what: str,session_ids: List[str]) -> SessionData:
     """
-    This function will return a SessionData object which contains a feature and labels list,
-    and methods to turn both into matrices.
+    This function takes as input a list of session_ids and will return a SessionData object containing each.
     """
     assert(what in ["train","test"])
 
@@ -129,31 +130,63 @@ def collect(what: str) -> SessionData:
 
     print("Rolling through sessions/creating labeled feature vectors for {}.csv".format(what))
 
-    Xs: List[Dict[str,str]] = []
-    ys: List[bool] = []
-
     # TODO
-    # for each session
+    # for each session in the list
         # for each interaction in the session
             # if it's of type "clickout", e.g. o.is_clickout
                 # create a positive training example and k negative samples
                 # extract features for each and add to x
 
-    assert(len(Xs) == len(ys))
-    return SessionData(Xs,ys)
+    return
 
 # globals
 item_properties_all: Dict[str,Hotel] = {}
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 
-# load in my item features
-with open("data/trivago/item_metadata.csv") as file:
-    reader = csv.DictReader(file)
-    dict: Dict[str,str]
-    for dict in tqdm(reader,total=927143):
-        id = dict["item_id"]
-        props: List[str] = dict["properties"].split("|")
-        item_properties_all[id] = Hotel(set(props))
+train_sessions: Dict[str,Session] = {}
+test_sessions: Dict[str,Session] = {}
 
-traindata = collect("train")
-testdata = collect("test")
+def load(nrows:int = 10_000) -> None:
+    """
+    1. Load in the train and test data as dictionaries which map ids to Session objects.
+    2. Also build a list of train and test session ids
+    3. also load in hotel metadata
+    4. returns nothing beecause these are all going to be global variables which get dumped
+    """
+
+    df_train = pd.read_csv("data/trivago/train.csv",nrows) #type:ignore
+    # appply the "save_session" function to each grouped item/session
+    # but first turn each group from a df into a list of dictionaries
+    A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
+    df_train.groupby(by="session_id").apply(A)
+
+    if what == "train":
+        print("Building user profiles")
+        for s in train_sessions: # loop through sessions
+            # try to add each session to session.user_id
+            uid = s.user_id # (use this many times)
+            try:
+                users[uid].sessions.append(s) # try to add the session
+            except KeyError:
+                # but if it doesn't work, create a new user at that address.
+                users[uid] = UserProfile(uid,[s])
+
+    print("Rolling through sessions/creating labeled feature vectors for {}.csv".format(what))
+
+
+
+
+
+
+    # load in my item features
+    with open("data/trivago/item_metadata.csv") as file:
+        reader = csv.DictReader(file)
+        dict: Dict[str,str]
+        for dict in tqdm(reader,total=927143):
+            id = dict["item_id"]
+            props: List[str] = dict["properties"].split("|")
+            item_properties_all[id] = Hotel(set(props))
+
+
+
+    pass
