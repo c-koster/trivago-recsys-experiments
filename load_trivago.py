@@ -49,11 +49,31 @@ def safe_mean(input: List[float]) -> float:
         return 0.0
     return sum(input) / len(input)
 
+def jaccard(lhs: Set[str], rhs: Set[str]) -> float:
+    isect_size = sum(1 for x in lhs if x in rhs)
+    union_size = len(lhs.union(rhs))
+    return isect_size / union_size
+
+def hotel_sim(id_x: str, id_y: str) -> float:
+    """
+    Look up the ids of the hotels from the dict and return the jaccard similarity of their properties
+    """
+    try:
+        x_props = id_to_hotel[id_x].props
+        y_props = id_to_hotel[id_y].props
+        return jaccard(x_props,y_props)
+    except KeyError:
+        # fix these weird dictionary misses
+        # print(id_x,id_y)
+        return 0
+
 
 # First define classes to make handling data a little easier.
 @dataclass
 class Hotel:
     props: Set[str]
+
+
 
 @dataclass
 class Interaction:
@@ -145,14 +165,17 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
     current_clickout = session.interactions[step]
     current_timestamp = current_clickout.timestamp # shorthand I'll use this a lot lot
     current_price = current_clickout.prices[choice_idx]
+    current_choice_id = current_clickout.impressions[choice_idx]
 
     prev_clickouts: List[Interaction] = [o for o in session.interactions[:step] if o.is_clickout]
     # last_clickout is really useful for extracting features
     # -- this will be set to None if there was no clickout
     last_clickout = prev_clickouts[-1] if len(prev_clickouts) else None
 
+
     features: Dict[str,Any] = { #type:ignore
-        # these are cheating, remove eventually
+
+        # these are cheating, remove eventually --
         "diff_now_end":len(session.interactions) - step,
         # session-based features
         "time_since_start": current_timestamp - session.start,
@@ -160,14 +183,16 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "diff_price_mean": current_price - safe_mean(session.interactions[step].prices),
         "last_price_diff": current_price - last_clickout.prices[last_clickout.get_clicked_idx()] if last_clickout else 0,
         "reciprocal_choice_rank": 1 / (choice_idx + 1), # rank starts at 1 index starts at
-        # z-score difference between price and average price of clicked hotels
+        # z-score (?) difference between price and average price of clicked hotels
         "avg_price_sim": current_price - safe_mean([o.prices[o.get_clicked_idx()] for o in prev_clickouts]) if last_clickout else 0,
-        # user-item or item-item features
-
-        # user-based features (these build on previous sessions or in conjunction with current sessions)
-
+        "prev_impression_sim": jaccard(set(last_clickout.impressions),set(current_clickout.impressions)) if last_clickout else 0,
+        # user-item or item-item features --
+        # roll through the previous items interacted in the session and average their jaccard similarity to the current item
+        "item-item-sim": safe_mean([hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]),
+        #"item_id": current_choice_id, # do this if you want a ton of features
+        # user-based features (these build on previous sessions or in conjunction with current sessions) --
+        "time_since_last_interact_this_item":1
     }
-
     return features
 
 
@@ -224,28 +249,25 @@ def collect(what: str) -> SessionData:
     return SessionData(Xs,ys)
 
 # globals
-item_properties_all: Dict[str,Hotel] = {}
+id_to_hotel: Dict[str,Hotel] = {}
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 
 # load in my item features
-"""
+
 with open("data/trivago/item_metadata.csv") as file:
     reader = csv.DictReader(file)
     dict: Dict[str,str]
     for dict in tqdm(reader,total=927143):
         id = dict["item_id"]
         props: List[str] = dict["properties"].split("|")
-        item_properties_all[id] = Hotel(set(props))
-"""
+        id_to_hotel[id] = Hotel(set(props))
+
 
 train = collect("train")
 #print("odd examples count after train: {}".format(err_count))
 
 test = collect("test")
 #print("odd examples count after test: {}".format(err_count))
-
-
-
 
 
 # dump dataset and put this in a different file
