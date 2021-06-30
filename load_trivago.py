@@ -26,7 +26,8 @@ global err_count
 err_count = 0
 #basic
 import csv
-from datetime import datetime
+from os import path
+#from datetime import datetime
 
 # matrix
 import pandas as pd
@@ -35,7 +36,7 @@ import numpy as np
 # fancy python styling and error bars
 from typing import Dict, List, Set, Optional, Any, Tuple
 from tqdm import tqdm
-from dataclasses import dataclass, field, default_factory
+from dataclasses import dataclass
 
 # sklearn. I want this ML experimentation in a different file really
 from sklearn.feature_extraction import DictVectorizer
@@ -59,8 +60,8 @@ def hotel_sim(id_x: str, id_y: str) -> float:
     Look up the ids of the hotels from the dict and return the jaccard similarity of their properties
     """
     try:
-        x_props = id_to_hotel[id_x].props
-        y_props = id_to_hotel[id_y].props
+        x_props = id_to_hotel[id_x].properties
+        y_props = id_to_hotel[id_y].properties
         return jaccard(x_props,y_props)
     except KeyError:
         # fix these weird dictionary misses
@@ -71,7 +72,11 @@ def hotel_sim(id_x: str, id_y: str) -> float:
 # First define classes to make handling data a little easier.
 @dataclass
 class Hotel:
-    props: Set[str]
+    item_id: str
+    properties: Set[str]
+    cat: str
+    rating: float
+    stars: float
 
 
 
@@ -196,7 +201,7 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
 
 
 
-def collect(what: str,session_ids: List[str]) -> SessionData:
+def collect(what: str) -> SessionData:
     """
     This function takes as input a list of session_ids and will return a SessionData object containing each.
     """
@@ -243,21 +248,22 @@ def collect(what: str,session_ids: List[str]) -> SessionData:
                     ys.append(label)
 
 
-    return
+    return SessionData(Xs,ys)
 
 # globals
 id_to_hotel: Dict[str,Hotel] = {}
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 
-# load in my item features
+# load in my item features --
 
-with open("data/trivago/item_metadata.csv") as file:
-    reader = csv.DictReader(file)
-    dict: Dict[str,str]
-    for dict in tqdm(reader,total=927143):
-        id = dict["item_id"]
-        props: List[str] = dict["properties"].split("|")
-        id_to_hotel[id] = Hotel(set(props))
+if not path.exists("data/trivago/item_metadata_dense.csv"):
+    import extract_hotel_features
+    extract_hotel_features.main()
+
+hotel_features_df = pd.read_csv("data/trivago/item_metadata_dense.csv") #type:ignore
+d = hotel_features_df.to_dict("records")
+for h in d: # loop over the dictionary version of this df
+    id_to_hotel[h["item_id"]] = Hotel(**h)
 
 
 train = collect("train")
