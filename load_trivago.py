@@ -24,6 +24,7 @@ Extract labels and features as follows:
 """
 global err_count
 err_count = 0
+
 #basic
 import csv
 from os import path
@@ -43,6 +44,7 @@ from sklearn.feature_extraction import DictVectorizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
+from sklearn.base import ClassifierMixin
 
 # helpers --
 def safe_mean(input: List[float]) -> float:
@@ -77,6 +79,10 @@ class Hotel:
     cat: str
     rating: float
     stars: float
+
+    def get_item_ctr(self) -> float:
+        return 1.0
+
 
 
 
@@ -199,8 +205,6 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
     return features
 
 
-
-
 def collect(what: str) -> SessionData:
     """
     This function takes as input a list of session_ids and will return a SessionData object containing each.
@@ -250,8 +254,10 @@ def collect(what: str) -> SessionData:
 
     return SessionData(Xs,ys)
 
+
 # globals
 id_to_hotel: Dict[str,Hotel] = {}
+
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 
 # load in my item features --
@@ -273,6 +279,7 @@ test = collect("test")
 #print("odd examples count after test: {}".format(err_count))
 
 
+
 # dump dataset and put this in a different file
 from sklearn.linear_model import LogisticRegression
 numberer = train.fit_vectorizer()
@@ -280,7 +287,7 @@ fscale = StandardScaler()
 X_train = fscale.fit_transform(train.get_matrix(numberer))
 y_train = train.get_ys()
 
-f = RandomForestClassifier()
+#f = RandomForestClassifier()
 f = LogisticRegression()
 f.fit(X_train, train.get_ys())
 
@@ -308,5 +315,5 @@ print("train AUC: {:3f}\n test AUC: {:3f}\n".format(train_auc,test_auc))
 print("Model Weights:")
 weights = f.coef_.ravel()
 
-for name,weight in sorted(zip(numberer.feature_names_,weights), key=lambda tup: tup[1],reverse=True):
+for name, weight in sorted(zip(numberer.feature_names_,weights), key=lambda tup: tup[1],reverse=True):
     print("{}\t{}".format(name,weight))

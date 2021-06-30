@@ -1,16 +1,16 @@
 """
 Extract rating and categoricial features from the hotels file, and then make a new file.
-
 Adapted from https://github.com/logicai-io/recsys2019
 """
 
-import numpy as np
 import pandas as pd
+import pickle
+from os import path
+
+from typing import Dict, Any
 
 RATING_MAP = {"Satisfactory Rating": 1, "Good Rating": 2, "Very Good Rating": 3, "Excellent Rating": 4}
-
 STAR_MAP = {"1 Star": 1, "2 Star": 2, "3 Star": 3, "4 Star": 4, "5 Star": 5}
-
 HOTEL_CAT = {
     "Hotel": "hotel",
     "Resort": "resort",
@@ -19,19 +19,10 @@ HOTEL_CAT = {
     "House / Apartment": "house",
 }
 
-IMPORTANT_FEATURES = [
-    "Free WiFi (Combined)",
-    "Swimming Pool (Combined Filter)",
-    "Car Park",
-    "Serviced Apartment",
-    "Air Conditioning",
-    "Spa (Wellness Facility)",
-    "Pet Friendly",
-    "All Inclusive (Upon Inquiry)",
-]
-
-
-def densify(d, properties):
+def densify(d: Dict[str,Any], properties):
+    """
+    Apply the mapping d to each row of properties
+    """
     values = [None] * properties.shape[0]
     for i, p in enumerate(properties):
         for k in d:
@@ -40,12 +31,20 @@ def densify(d, properties):
     return values
 
 def main() -> None:
+    if not path.exists("data/trivago/item_clicks.csv"):
+        import compute_ctr
+        compute_ctr.main()
+
+
     df = pd.read_csv("data/trivago/item_metadata.csv")
     df["properties"] = df["properties"].str.split("|").map(set)
     df["rating"] = densify(RATING_MAP, df["properties"])
     df["stars"] = densify(STAR_MAP, df["properties"])
     df["cat"] = densify(HOTEL_CAT, df["properties"])
-    df.to_csv("data/trivago/item_metadata_dense.csv", index=False)
+
+
+    ctr = pd.read_csv('data/trivago/item_clicks.csv')
+    pd.merge(df,ctr,on="item_id",how="left").to_csv("data/trivago/item_metadata_dense.csv", index=False)
     return
 
 if __name__ == "__main__":
