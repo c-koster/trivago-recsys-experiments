@@ -79,9 +79,7 @@ class Hotel:
     cat: str
     rating: float
     stars: float
-
-    def get_item_ctr(self) -> float:
-        return 1.0
+    ctr: float
 
 
 
@@ -181,6 +179,16 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
     # -- this will be set to None if there was no clickout
     last_clickout = prev_clickouts[-1] if len(prev_clickouts) else None
 
+    item_exists: bool
+    try:
+        id_to_hotel[current_choice_id]
+        item_exists = True
+    except KeyError:
+        item_exists = False
+        print("Key Error... {} does not exist in our dict".format(current_choice_id))
+
+
+    hotel_sims = [hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]
 
     features: Dict[str,Any] = { #type:ignore
 
@@ -197,10 +205,11 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "prev_impression_sim": jaccard(set(last_clickout.impressions),set(current_clickout.impressions)) if last_clickout else 0,
         # user-item or item-item features --
         # roll through the previous items interacted in the session and average their jaccard similarity to the current item
-        "item-item-sim": safe_mean([hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]),
-        #"item_id": current_choice_id, # do this if you want a ton of features
+        "item-item-sim": safe_mean(hotel_sims),
+        "item-ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0.0,
+
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
-        "time_since_last_interact_this_item":1
+        #"time_since_last_interact_this_item":1
     }
     return features
 
@@ -213,7 +222,7 @@ def collect(what: str) -> SessionData:
 
     sessions: List[Session] = []
 
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=10_000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -267,9 +276,12 @@ if not path.exists("data/trivago/item_metadata_dense.csv"):
     extract_hotel_features.main()
 
 hotel_features_df = pd.read_csv("data/trivago/item_metadata_dense.csv") #type:ignore
+hotel_features_df["item_id"] = hotel_features_df["item_id"].apply(str) # make sure the id is of type str, not int
+hotel_features_df["properties"] = hotel_features_df["properties"].str.split("|").map(set)
 d = hotel_features_df.to_dict("records")
 for h in d: # loop over the dictionary version of this df
     id_to_hotel[h["item_id"]] = Hotel(**h)
+
 
 
 train = collect("train")

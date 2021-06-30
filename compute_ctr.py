@@ -38,7 +38,7 @@ def main() -> None:
     # i want the df to look like
     # id | ctr
     # AB | 0.1
-    clicks.to_csv("data/trivago/item_clicks.csv")
+    clicks.to_csv("data/trivago/item_clicks.csv",index=False)
 
 
 
