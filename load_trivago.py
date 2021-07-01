@@ -80,6 +80,7 @@ class Hotel:
     rating: float
     stars: float
     ctr: float
+    ctr_prob: float
 
 
 
@@ -207,7 +208,7 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         # roll through the previous items interacted in the session and average their jaccard similarity to the current item
         "item-item-sim": safe_mean(hotel_sims),
         "item-ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0.0,
-
+        "item-ctr-prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0.0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
         #"time_since_last_interact_this_item":1
     }
@@ -222,7 +223,7 @@ def collect(what: str) -> SessionData:
 
     sessions: List[Session] = []
 
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=10_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -278,7 +279,8 @@ if not path.exists("data/trivago/item_metadata_dense.csv"):
 hotel_features_df = pd.read_csv("data/trivago/item_metadata_dense.csv") #type:ignore
 hotel_features_df["item_id"] = hotel_features_df["item_id"].apply(str) # make sure the id is of type str, not int
 hotel_features_df["properties"] = hotel_features_df["properties"].str.split("|").map(set)
-d = hotel_features_df.to_dict("records")
+
+d: Dict = hotel_features_df.to_dict("records")
 for h in d: # loop over the dictionary version of this df
     id_to_hotel[h["item_id"]] = Hotel(**h)
 
@@ -293,6 +295,7 @@ test = collect("test")
 
 
 # dump dataset and put this in a different file
+
 from sklearn.linear_model import LogisticRegression
 numberer = train.fit_vectorizer()
 fscale = StandardScaler()
@@ -329,3 +332,18 @@ weights = f.coef_.ravel()
 
 for name, weight in sorted(zip(numberer.feature_names_,weights), key=lambda tup: tup[1],reverse=True):
     print("{}\t{}".format(name,weight))
+
+
+def compute_clickout_rr(model: ClassifierMixin, clickout_ids: List[str]) -> List[float]:
+    """
+    Mean Reciprocal Rank:
+    """
+
+    # 1. get all the clickout ids, which should be of the form session_id|step
+    # in increments of 25:
+    # use labels to find which item is the "relevant" one
+    # if no relevant one:
+    #continue
+    # predict on features X and re-sort the items.. return a sorted list of item ids
+    # Score based upon the index you found the relevant item.
+    pass

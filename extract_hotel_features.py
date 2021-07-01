@@ -37,12 +37,12 @@ def main() -> None:
 
 
     df = pd.read_csv("data/trivago/item_metadata.csv")
-    df["properties_n"] = df["properties"].str.split("|").map(set)
-    df["rating"] = densify(RATING_MAP, df["properties_n"])
-    df["stars"] = densify(STAR_MAP, df["properties_n"])
-    df["cat"] = densify(HOTEL_CAT, df["properties_n"])
+    df["properties_temp"] = df["properties"].str.split("|").map(set)
+    df["rating"] = densify(RATING_MAP, df["properties_temp"])
+    df["stars"] = densify(STAR_MAP, df["properties_temp"])
+    df["cat"] = densify(HOTEL_CAT, df["properties_temp"])
 
-    df = df.drop(columns=["properties_n"])
+    df = df.drop(columns=["properties_temp"])
     ctr = pd.read_csv('data/trivago/item_clicks.csv')
     merged = pd.merge(df,ctr,on="item_id",how="left")
     merged = merged.fillna(value=0)
