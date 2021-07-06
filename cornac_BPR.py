@@ -32,7 +32,7 @@ NUM_FACTORS = 200
 NUM_EPOCHS = 100
 
 types = []
-train = pd.read_csv("data/trivago/train.csv",nrows=1_000) #type:ignore
+train = pd.read_csv("data/trivago/train.csv") #type:ignore
 
 check_valid = lambda x: x.isnumeric()
 train["is_item_interaction"] = train["reference"].apply(check_valid)
