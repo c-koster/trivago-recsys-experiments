@@ -1,65 +1,74 @@
 """
-Collaborative filtering: Use user-item interactions to help in recommendations
+Collaborative filtering: Use user-item interactions to help in recommendations.
+
+Code adapted from a https://github.com/microsoft/recommenders notebook on the movielens dataset.
+
+a few things to note. That the examples I’m seeing in the notebook are user/movie
+interactions in which each user has *only one* interaction with a movie, and this interaction
+has a rating between 1 and 5. The dataset I’m working with has potentially multiple interactions,
+and these are not rated.
+
+My first task is to code values for click-outs and item-information clicks, and sum these so that only
+one interaction exists for any user and hotel pair (I need a bipartite graph, not a bipartite multigraph).
 """
 
-# boilerplate imports
 import sys
-import pyspark
-from pyspark.ml.recommendation import ALS  # for Matrix Factorization using ALS
-import pyspark.sql.functions as F
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField
-from pyspark.sql.types import StringType, FloatType, IntegerType, LongType
+import os
+import cornac
 
+import pandas as pd
+
+from reco_utils.dataset.python_splitters import python_random_split
+from reco_utils.evaluation.python_evaluation import map_at_k, ndcg_at_k, precision_at_k, recall_at_k
+from reco_utils.recommender.cornac.cornac_utils import predict_ranking
 from reco_utils.common.timer import Timer
-from reco_utils.common.notebook_utils import is_jupyter
-from reco_utils.dataset.spark_splitters import spark_random_split
-from reco_utils.evaluation.spark_evaluation import SparkRatingEvaluation, SparkRankingEvaluation
-from reco_utils.common.spark_utils import start_or_get_spark
+from reco_utils.common.constants import SEED
 
-
+# top k items to recommend
 TOP_K = 25
 
+# Model parameters
+NUM_FACTORS = 200
+NUM_EPOCHS = 100
 
-# the following settings work well for debugging locally on VM - change when running on a cluster
-# set up a giant single executor with many threads and specify memory cap
-spark = start_or_get_spark("ALS PySpark", memory="8g")
+types = []
+train = pd.read_csv("data/trivago/train.csv",nrows=1_000) #type:ignore
 
-# get me a schema
-# Note: The DataFrame-based API for ALS currently only supports integers for user and item ids.
-# user_id,session_id,timestamp,step,action_type,reference,platform,city,device,current_filters,impressions,prices
+check_valid = lambda x: x.isnumeric()
+train["is_item_interaction"] = train["reference"].apply(check_valid)
+train = train[train.is_item_interaction == True]
 
-schema = StructType(
-    (
-        StructField("user_id", StringType()),
-        StructField("session_id", StringType()),
-        StructField("timestamp", LongType()),
-        StructField("step", IntegerType()),
-        StructField("action_type", StringType()),
-        StructField("reference", IntegerType()),
-    )
+
+rating_func = lambda x: 1 if x == 'clickout item' else 0.2
+train["rating"] = train["action_type"].apply(rating_func)
+train["group_id"] = train["user_id"] + "/" + train["reference"]
+train = train.groupby(["group_id"]).agg({'user_id': 'first', 'reference': 'first', 'rating':'sum'})
+print(train.columns)
+
+
+# get my pretend movielens dataset into cornac format -- and p
+train_set = cornac.data.Dataset.from_uir(train.itertuples(index=False), seed=SEED)
+
+print('Number of users: {}'.format(train_set.num_users))
+print('Number of items: {}'.format(train_set.num_items))
+
+
+bpr = cornac.models.BPR(
+    k=NUM_FACTORS,
+    max_iter=NUM_EPOCHS,
+    learning_rate=0.01,
+    lambda_reg=0.001,
+    verbose=True,
+    seed=SEED
 )
-data = spark.read.csv('data/trivago/train.csv', header=True, schema=schema)
-data.show()
 
-# next transform data so that postive interactions are a 1 and non interactions
-# are a -1
-
-
-header = {
-    "userCol": "user_id",
-    "itemCol": "reference",
-    "ratingCol": "action_type",
-}
+with Timer() as t:
+    bpr.fit(train_set)
+print("Took {} seconds for training.".format(t))
 
 
-als = ALS(
-    rank=10,
-    maxIter=15,
-    implicitPrefs=False,
-    regParam=0.05,
-    coldStartStrategy='drop',
-    nonnegative=False,
-    seed=42,
-    **header
-)
+with Timer() as t:
+    all_predictions = predict_ranking(bpr, train, usercol='user_id', itemcol='reference', remove_seen=True)
+print("Took {} seconds for prediction.".format(t))
+
+print(all_predictions.head())

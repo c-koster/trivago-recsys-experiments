@@ -247,13 +247,14 @@ def collect(what: str) -> SessionData:
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
-    def append_session(x) -> None:
+    def append_session(x, add_ambiguous_users: bool = False) -> None:
         dict = x.to_dict("records")
         sess = create_session([])
         sessions.append(sess)
-
+        #if add_ambiguous_users:
         #random.seed(RANDOM_SEED)
-        #if random.random
+        #if random.random() > 0.1:
+        # create a session with a random user id
 
 
     df_interactions.groupby(by="session_id").apply(A)
