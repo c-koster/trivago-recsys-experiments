@@ -148,7 +148,6 @@ class UserProfile:
 class SessionData:
     examples: List[Dict[str,str]]
     labels: List[bool]
-    session_dict: Dict[str,Session]
     qids: List[str]
 
     def fit_vectorizer(self) -> DictVectorizer:
@@ -168,7 +167,7 @@ class SessionData:
         Helps me commpute mean reciprocal rank later on.
         """
         # access the session dict, then skip to the corresponding step in that session's interaction list
-        s_temp: Session = self.session_dict[session_id]
+        s_temp: Session = sids_to_data[session_id]
         return s_temp
 
 
@@ -250,55 +249,27 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
 
 
 
-def collect(what: str) -> SessionData:
+def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> SessionData:
     """
     This function takes as input a filename and will return a SessionData object containing
     a list of clickout features, a list of labels, and methods to convert each into matrices.
     """
-    assert(what in ["train","test"])
+    sessions: List[Session] = [sids_to_data[s_id] for s_id in session_ids]
 
-    sessions: List[Session] = []
+    if create_examples > 0: # TODO create examples is presently broken
 
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=10_000) #type:ignore
-    # appply the "save_session" function to each grouped item/session
-    # but first turn each group from a df into a list of dictionaries
-    A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
-    df_interactions.groupby(by="session_id").apply(A)
-
-    if what == "train":
-        # for every ten sessions: add another session where we scramble the user ID so the model doesn't overfit
+        # add another session where we scramble the user ID so the model doesn't overfit
         sessions_duplicates, _ = train_test_split(sessions,train_size=0.1,random_state=RANDOM_SEED)
         [sessions.append(s_dup.set_user_id(num)) for num, s_dup in enumerate(sessions_duplicates)]
-        print("added {} duplicates to our training data to prevent overfittinng".format(len(sessions_duplicates)))
+        print("added {} duplicates to our training data to prevent overfitting".format(len(sessions_duplicates)))
 
-
-        print("Building user profiles") # how do I want to make user profiles?
-
-
-        for s in sessions: # loop through sessions
-            # try to add each session to session.user_id
-            hotels_in_session: Set[str] = set([o.action_on for o in s.interactions if o.action_on != "nan"])
-
-            uid = s.user_id # (use this many times)
-            try:
-                users[uid].sessions.append(s) # try to add the session
-                users[uid].unique_interactions.update(hotels_in_session)
-            except KeyError:
-                # but if it doesn't work, create a new user at that address.
-                users[uid] = UserProfile(uid,[s],hotels_in_session)
-
-
-    print("Rolling through ({}) sessions/creating labeled feature vectors for {}.csv".format(len(sessions), what))
+    print("Rolling through ({}) sessions/creating labeled feature vectors for {} sessions".format(len(sessions), what))
 
     Xs: List[Dict[str,str]] = []
     ys: List[bool] = []
     qids: List[str] = []
-    session_dict: Dict[str,Session] = {}
-
 
     for s in sessions: # for each session -- --
-        session_dict[s.session_id] = s # save it to a dict
-
         for step, o in enumerate(s.interactions): # for each interaction in the session
 
             # if it's of type "clickout", e.g. o.is_clickout
@@ -314,12 +285,31 @@ def collect(what: str) -> SessionData:
                     ys.append(label)
 
 
-    return SessionData(Xs,ys,session_dict, qids)
+    return SessionData(Xs,ys, qids)
 
+
+def load_session_dict(what: str) -> Dict[str,Session]:
+    """
+    This function be called on both train and test sets, so that I can get both a list of unique session ids to collect later,
+    and a way to access these sessions (in collect) in  O(1) time.
+    """
+    assert(what in ["train","test"])
+
+    sessions: List[Session] = []
+    # nrows=1_000 for my laptop's sake
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    # appply the "save_session" function to each grouped item/session
+    # but first turn each group from a df into a list of dictionaries
+    A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
+    df_interactions.groupby(by="session_id").apply(A)
+
+    sessions_dict: Dict[str,Session] = {}
+    for s in sessions:
+        sessions_dict[s.session_id] = s
+    return sessions_dict
 
 # globals
 id_to_hotel: Dict[str,Hotel] = {}
-
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 
 # load in my item features --
@@ -336,72 +326,89 @@ d: Dict = hotel_features_df.to_dict("records")
 for h in d: # loop over the dictionary version of this df
     id_to_hotel[h["item_id"]] = Hotel(**h)
 
+sessions_tv = load_session_dict("train") # need to split ids by train and vali
+sessions_test = load_session_dict("test")
+session_ids_test = list(sessions_test.keys())
 
+session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED)
 
-train = collect("train")
-#print("odd examples count after train: {}".format(err_count))
+print("Building user profiles") # how do I want to make user profiles?
 
-test = collect("test")
-#print("odd examples count after test: {}".format(err_count))
+s_id: str
+for s_id in session_ids_train: # loop through sessions
+    s: Session = sessions_tv[s_id]
+    # try to add each session to session.user_id
+    hotels_in_session: Set[str] = set([o.action_on for o in s.interactions if o.action_on != "nan"])
 
+    uid = s.user_id # (use this many times)
+    try:
+        users[uid].sessions.append(s) # try to add the session
+        users[uid].unique_interactions.update(hotels_in_session)
+    except KeyError:
+        # but if it doesn't work, create a new user at that address.
+        users[uid] = UserProfile(uid,[s],hotels_in_session)
 
+sids_to_data = {**sessions_tv,**sessions_test} # dangerous maybe to put train and test in the same dict?
 
-
+train = collect("train",session_ids_train) # create_examples=0.1
+vali = collect("vali",session_ids_vali)
+test = collect("test",session_ids_test)
 
 # dump dataset and put this in a different file
-
 from sklearn.linear_model import LogisticRegression
+
+
+def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
+    """ helper because I've typed out these two lines 10000 times """
+    m_pred = m.predict_proba(X)[:, 1].ravel()
+    return roc_auc_score(y_true=y, y_score=m_pred)
+
 numberer = train.fit_vectorizer()
 fscale = StandardScaler()
+
 X_train = fscale.fit_transform(train.get_matrix(numberer))
 y_train = train.get_ys()
 
 f = LogisticRegression()
 f.fit(X_train, y_train)
+train_auc = auc(f,X_train,y_train) # how well did I memorize the training data
 
 
-train_pred = f.predict_proba(X_train)[:, 1].ravel()
-train_auc = roc_auc_score(y_true=y_train, y_score=train_pred)
-# how well did I memorize the training data
+X_vali = fscale.fit_transform(vali.get_matrix(numberer))
+y_vali = vali.get_ys()
+vali_auc = auc(f,X_vali,y_vali)
 
 
 X_test = fscale.fit_transform(test.get_matrix(numberer))
 y_test = test.get_ys()
-
-
+"""
 test_pred = f.predict_proba(X_test)[:, 1].ravel()
 test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
+"""
+
 # how well did my model learn the data
-print("\n---Results---")
-print("training data's shape: {}".format(str(X_train.shape)))
-print("train AUC: {:3f}\n test AUC: {:3f}\n".format(train_auc,test_auc))
-# explain my model. works for linear only
-print("Best Model Weights:")
-#weights = f.feature_importances_.ravel()
-weights = f.coef_.ravel()
-
-for name, weight in sorted(zip(numberer.feature_names_,weights), key=lambda tup: tup[1],reverse=True):
-    print("{}\t{}".format(name,weight))
-
+print("\n---Data Shape---")
+print("train shape: {}\n vali shape {}\n test shape {}\n".format(str(X_train.shape),str(X_vali.shape),str(X_test.shape)))
+print("train AUC: {:3f}\n vali AUC {:3f}".format(train_auc,vali_auc))
 
 @dataclass
-class ExperimentResult: # fancy tuple
+class ExperimentResult: # fancy tuple with its own print function
     model: ClassifierMixin
     params: Dict[str,str]
+    # metrics
     train_auc: float
+    vali_auc: float
     mrr_train: float
-    test_auc: float
+    mrr_vali: float
 
     def outputs(self) -> None:
         print("Model params",self.params)
-        print("Results\n-------\n train_auc: {}\nmrr_train: {}\n test_auc: {}".format(self.train_auc,self.mrr_train,self.test_auc))
+        print("Results\n-------\n train_auc: {:3f}\nmrr_train: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.mrr_train,self.vali_auc,self.mrr_vali))
         if hasattr(self.model, 'feature_importances_'):
             print(
                 "Feature Importances:",
                 sorted(
-                    zip(numberer.feature_names_, self.model.feature_importances_),
-                    key=lambda tup: tup[1],
-                    reverse=True,
+                    zip(numberer.feature_names_, self.model.feature_importances_), key=lambda tup: tup[1], reverse=True,
                 ),
             )
         else:
@@ -410,37 +417,56 @@ class ExperimentResult: # fancy tuple
 
 def tune_RF_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(5)): # random seed loop
-        for i in [1]:
-            for j in [1]:
-                params = {
+    for rnd in tqdm(range(4)): # random seed loop
+        for crit in ["gini", "entropy"]:
+            for d in [8,16,32, None]:
+                params: Dict[str,str] = {
                     "random_state": RANDOM_SEED + rnd,
+                    "criterion": crit,
+                    "max_depth": d,
                 }
                 m = RandomForestClassifier(**params)
                 m.fit(X_train, y_train)
-                train_pred = m.predict_proba(X_train)[:, 1].ravel()
-                train_auc = roc_auc_score(y_true=y_train, y_score=train_pred)
 
-                test_pred = m.predict_proba(X_test)[:, 1].ravel()
-                test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
+                train_auc = auc(m,X_train,y_train)
+                vali_auc = auc(m,X_vali,y_vali)
+
                 train_mrr = safe_mean(compute_clickout_RR(m,train))
+                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
 
-                experiments.append(ExperimentResult(m,params,train_auc,train_mrr,test_auc))
+                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
+                experiments.append(result)
 
 
-    return max(experiments,key=lambda tup: tup.mrr_train)
+    return max(experiments, key = lambda tup: tup.mrr_vali)
 
 def tune_MLP_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(5)): # random seed loop
-        for i in [1]:
-            for j in [1]:
-                params = {
+    for rnd in tqdm(range(4)): # random seed loop
+        for layer in [(32,), (16,16,), (16,16,16,)]:
+            for activation in ['logistic','relu']:
+                params: Dict[str,str] = {
+                    "hidden_layer_sizes": layer,
                     "random_state": RANDOM_SEED + rnd,
+                    "activation":activation,
+                    "solver": "lbfgs",
+                    "max_iter": 1e4,
+                    "alpha": 0.0001,
                 }
                 m = MLPClassifier(**params)
 
-    return max(experiments,key=lambda tup: tup.mrr_train)
+                m.fit(X_train, y_train)
+
+                train_auc = auc(m,X_train,y_train)
+                vali_auc = auc(m,X_vali,y_vali)
+
+                train_mrr = safe_mean(compute_clickout_RR(m,train))
+                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
+
+                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
+                experiments.append(result)
+
+    return max(experiments, key = lambda tup: tup.mrr_vali)
 
 
 # ok now evaluate the model on the metric that we care about: Mean Reciprocal Rank (MRR)
@@ -484,13 +510,21 @@ def compute_clickout_RR(model: ClassifierMixin, data: SessionData) -> List[float
     return reciprocal_ranks
 
 MRR_train = safe_mean(compute_clickout_RR(f,train))
-#MRR_test = np.mean(compute_clickout_RR(f,test))
-print("MRR_train: {}\nMRR_test: {}".format(MRR_train,0))
+MRR_vali = np.mean(compute_clickout_RR(f,vali))
+print("MRR_train: {:3f}\nMRR_vali: {:3f}".format(MRR_train,MRR_vali))
+
+
 
 print("trying a bunch of RF models")
-e = tune_RF_model()
-e.outputs()
+rf = tune_RF_model()
+rf.outputs()
 
 print("and some MLP classifiers")
 nn = tune_MLP_model()
 nn.outputs()
+
+
+test_mrr_rf = safe_mean(compute_clickout_RR(rf.model,test))
+test_mrr_nn = safe_mean(compute_clickout_RR(nn.model,test))
+
+print("EXPERIMENTS:\nrf test_MRR:{:3f}\nnn test_MRR:{:3f}".format(test_mrr_rf,test_mrr_nn))
