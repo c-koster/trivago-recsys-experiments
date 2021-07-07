@@ -43,9 +43,13 @@ from dataclasses import dataclass
 
 # sklearn. I want this ML experimentation in a different file really
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+
+# models --
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
 
 # helpers --
@@ -120,6 +124,18 @@ class Session:
     session_id: str
     interactions: List[Interaction]
 
+    def set_user_id(self,num: int) -> "Session":
+        """
+        Better to
+        """
+        new_user_id: str = self.user_id + "abc" + str(num)
+        new_session_id: str = self.session_id + "abc" + str(num)
+        new_session: Session = Session(self.start,new_user_id,new_session_id,self.interactions)
+        return new_session
+
+
+
+
 @dataclass
 class UserProfile:
     user_id: str
@@ -149,7 +165,7 @@ class SessionData:
 
     def get_session(self, session_id: str) -> Session:
         """
-        Helps me commpute mean reciprocal rank later on
+        Helps me commpute mean reciprocal rank later on.
         """
         # access the session dict, then skip to the corresponding step in that session's interaction list
         s_temp: Session = self.session_dict[session_id]
@@ -199,7 +215,7 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         item_exists = True
     except KeyError:
         item_exists = False
-        print("Key Error... {} does not exist in our dict".format(current_choice_id))
+        #print("Key Error... {} does not exist in our dict".format(current_choice_id))
 
 
     hotel_sims = [hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]
@@ -243,27 +259,22 @@ def collect(what: str) -> SessionData:
 
     sessions: List[Session] = []
 
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=10_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
-    def append_session(x, add_ambiguous_users: bool = False) -> None:
-        dict = x.to_dict("records")
-        sess = create_session([])
-        sessions.append(sess)
-        #if add_ambiguous_users:
-        #random.seed(RANDOM_SEED)
-        #if random.random() > 0.1:
-        # create a session with a random user id
-
-
     df_interactions.groupby(by="session_id").apply(A)
 
-    # for every ten sessions: add another where we scramble
-
-
     if what == "train":
+        # for every ten sessions: add another session where we scramble the user ID so the model doesn't overfit
+        sessions_duplicates, _ = train_test_split(sessions,train_size=0.1,random_state=RANDOM_SEED)
+        [sessions.append(s_dup.set_user_id(num)) for num, s_dup in enumerate(sessions_duplicates)]
+        print("added {} duplicates to our training data to prevent overfittinng".format(len(sessions_duplicates)))
+
+
         print("Building user profiles") # how do I want to make user profiles?
+
+
         for s in sessions: # loop through sessions
             # try to add each session to session.user_id
             hotels_in_session: Set[str] = set([o.action_on for o in s.interactions if o.action_on != "nan"])
@@ -345,9 +356,8 @@ fscale = StandardScaler()
 X_train = fscale.fit_transform(train.get_matrix(numberer))
 y_train = train.get_ys()
 
-#f = RandomForestClassifier()
 f = LogisticRegression()
-f.fit(X_train, train.get_ys())
+f.fit(X_train, y_train)
 
 
 train_pred = f.predict_proba(X_train)[:, 1].ravel()
@@ -362,15 +372,10 @@ y_test = test.get_ys()
 test_pred = f.predict_proba(X_test)[:, 1].ravel()
 test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
 # how well did my model learn the data
-
-
 print("\n---Results---")
 print("training data's shape: {}".format(str(X_train.shape)))
 print("train AUC: {:3f}\n test AUC: {:3f}\n".format(train_auc,test_auc))
-
-
 # explain my model. works for linear only
-
 print("Best Model Weights:")
 #weights = f.feature_importances_.ravel()
 weights = f.coef_.ravel()
@@ -379,6 +384,63 @@ for name, weight in sorted(zip(numberer.feature_names_,weights), key=lambda tup:
     print("{}\t{}".format(name,weight))
 
 
+@dataclass
+class ExperimentResult: # fancy tuple
+    model: ClassifierMixin
+    params: Dict[str,str]
+    train_auc: float
+    mrr_train: float
+    test_auc: float
+
+    def outputs(self) -> None:
+        print("Model params",self.params)
+        print("Results\n-------\n train_auc: {}\nmrr_train: {}\n test_auc: {}".format(self.train_auc,self.mrr_train,self.test_auc))
+        if hasattr(self.model, 'feature_importances_'):
+            print(
+                "Feature Importances:",
+                sorted(
+                    zip(numberer.feature_names_, self.model.feature_importances_),
+                    key=lambda tup: tup[1],
+                    reverse=True,
+                ),
+            )
+        else:
+            print("Not explainable.")
+
+
+def tune_RF_model() -> ExperimentResult:
+    experiments: List[ExperimentResult] = []
+    for rnd in tqdm(range(5)): # random seed loop
+        for i in [1]:
+            for j in [1]:
+                params = {
+                    "random_state": RANDOM_SEED + rnd,
+                }
+                m = RandomForestClassifier(**params)
+                m.fit(X_train, y_train)
+                train_pred = m.predict_proba(X_train)[:, 1].ravel()
+                train_auc = roc_auc_score(y_true=y_train, y_score=train_pred)
+
+                test_pred = m.predict_proba(X_test)[:, 1].ravel()
+                test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
+                train_mrr = safe_mean(compute_clickout_RR(m,train))
+
+                experiments.append(ExperimentResult(m,params,train_auc,train_mrr,test_auc))
+
+
+    return max(experiments,key=lambda tup: tup.mrr_train)
+
+def tune_MLP_model() -> ExperimentResult:
+    experiments: List[ExperimentResult] = []
+    for rnd in tqdm(range(5)): # random seed loop
+        for i in [1]:
+            for j in [1]:
+                params = {
+                    "random_state": RANDOM_SEED + rnd,
+                }
+                m = MLPClassifier(**params)
+
+    return max(experiments,key=lambda tup: tup.mrr_train)
 
 
 # ok now evaluate the model on the metric that we care about: Mean Reciprocal Rank (MRR)
@@ -401,21 +463,15 @@ def compute_clickout_RR(model: ClassifierMixin, data: SessionData) -> List[float
         queried_session = data.get_session(session_id) # queried session
         o = queried_session.interactions[step]
 
-
         true_y = o.action_on
         if true_y not in o.impressions: # sometimes action_on is missing from the test set
             continue
-
-
         Xs_query = [extract_features(queried_session, step, index) for index, _ in enumerate(o.impressions)]
         # extract features takes a session, a step, and a choice index.
-
 
         X_qid = fscale.transform(numberer.transform(Xs_query))
         # this outputs two values -- we want the
         qid_scores = model.predict_proba(X_qid)[:,1].ravel()
-
-
         # predict on features X and re-sort the items.. return a sorted list of item ids
         impressions_shuffled = [i[0] for i in sorted(zip(o.impressions, qid_scores), key=lambda tup: tup[1],reverse=True) ]
 
@@ -424,10 +480,17 @@ def compute_clickout_RR(model: ClassifierMixin, data: SessionData) -> List[float
         # we don't quite care about the real choice in creating features here
         # because we're not evaluating click accuracy, we're using a listwise metric
 
-
         # Score based upon the index you found the relevant item.
     return reciprocal_ranks
 
 MRR_train = safe_mean(compute_clickout_RR(f,train))
 #MRR_test = np.mean(compute_clickout_RR(f,test))
 print("MRR_train: {}\nMRR_test: {}".format(MRR_train,0))
+
+print("trying a bunch of RF models")
+e = tune_RF_model()
+e.outputs()
+
+print("and some MLP classifiers")
+nn = tune_MLP_model()
+nn.outputs()
