@@ -112,9 +112,11 @@ class Interaction:
             cheat = (choice_idx == current_clickout.get_clicked_idx())
         """
         assert(self.is_clickout)
-        idx: int = self.impressions.index(self.action_on)
-        assert(idx != -1)
-
+        idx: int
+        try:
+            idx = self.impressions.index(self.action_on)
+        except ValueError:
+            idx = -1
         return idx
 
 @dataclass(unsafe_hash=True) #TypeError: unhashable type: 'Session' -- should be fine as we don't change this ever
@@ -272,17 +274,19 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
     for s in sessions: # for each session -- --
         for step, o in enumerate(s.interactions): # for each interaction in the session
 
+
             # if it's of type "clickout", e.g. o.is_clickout
             if o.is_clickout:
-                # create a positive training example and 24 negatives... also extract features for each and add to x
-                for index, choice in enumerate(o.impressions):
-                    label = (choice == o.action_on)
+                if o.get_clicked_idx() != -1:
+                    # create a positive training example and 24 negatives... also extract features for each and add to x
+                    for index, choice in enumerate(o.impressions):
+                        label = (choice == o.action_on)
 
-                    features = extract_features(s,step,index) # feature extraction needs session, interaction info, and
+                        features = extract_features(s,step,index) # feature extraction needs session, interaction info, and
 
-                    qids.append("{}/{}".format(s.session_id, step))
-                    Xs.append(features)
-                    ys.append(label)
+                        qids.append("{}/{}".format(s.session_id, step))
+                        Xs.append(features)
+                        ys.append(label)
 
 
     return SessionData(Xs,ys, qids)
