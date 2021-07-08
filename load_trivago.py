@@ -39,6 +39,7 @@ import numpy as np
 # fancy python styling and error bars
 from typing import Dict, List, Set, Optional, Any, Tuple
 from tqdm import tqdm
+
 from dataclasses import dataclass
 
 # sklearn. I want this ML experimentation in a different file really
@@ -271,7 +272,7 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
     ys: List[bool] = []
     qids: List[str] = []
 
-    for s in sessions: # for each session -- --
+    for s in tqdm(sessions): # for each session -- --
         for step, o in enumerate(s.interactions): # for each interaction in the session
 
 
