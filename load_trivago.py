@@ -149,6 +149,7 @@ class UserProfile:
 # this one is a wrapper for training and test data types
 @dataclass
 class SessionData:
+    data: pd.DataFrame
     examples: List[Dict[str,str]]
     labels: List[bool]
     qids: List[str]
@@ -186,7 +187,7 @@ def create_session(df: List[Dict[str,str]]) -> Session:
         t = int(d["timestamp"])#datetime.fromtimestamp(int(d["timestamp"]))
         global err_count
         if is_clickout:
-            if type(d["reference"]) == type(1.0): # TODO: what are these examples ??
+            if type(d["reference"]) == type(1.0): #  meaning that there is a clickout but it is a NaN. don't know whow to interpret this TODO
                 err_count +=1
             i = Interaction(t,d["action_type"], str(d["reference"]),
             is_clickout, d["impressions"].split("|"), [float(i) for i in d["prices"].split("|")])
@@ -290,7 +291,7 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
                         ys.append(label)
 
 
-    return SessionData(Xs,ys, qids)
+    return SessionData(pd.DataFrame(), Xs,ys, qids)
 
 
 def load_session_dict(what: str) -> Dict[str,Session]:
@@ -302,7 +303,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
