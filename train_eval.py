@@ -24,7 +24,7 @@ import numpy as np
 
 
 # sklearn models and processing. It would be really cool if I didn't have to
-# decompose my pandas df into a dictionary to then run dictvectorizer and standarscaler
+# decompose my pandas df into a dictionary to then run dictvectorizer and standardscaler
 # on it but I'm getting some weird error
 from sklearn.linear_model import LogisticRegression
 from sklearn.feature_extraction import DictVectorizer
@@ -37,53 +37,74 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
 
-
-
 RANDOM_SEED = 42
-
-
+n_rand = 1
 
 data_all = pd.read_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 
 # split the data back into three frames
 train = data_all[data_all.grp == 0]
-train_qids = list(train.q_id.unique())
 
 vali = data_all[data_all.grp == 1]
-vali_qids = list(vali.q_id.unique())
 
 test = data_all[data_all.grp == 2]
-test_qids = list(test.q_id.unique())
 
 
-# helper functions to extract data in two cases
+# careful with this one list -- if you don't keep this value updated you could
+# drop new features from the matrix
+"""
+feature_names: List[str] = [
+    "diff_now_end",
+    "time_since_start",
+    "time_since_last_clickout",
+    "diff_price_mean",
+    "last_price_diff",
+    "reciprocal_choice_rank",
+    "delta_position_last_position",
+    "avg_price_sim",
+    "item_item_sim",
+    "item_ctr",
+    "item_ctr_prob",
+    "unique_item_interact_by_user"
+]
+"""
 
-def fit_vectorizer(self) -> DictVectorizer:
+feature_names = list(data_all.columns)
+for i in ['y','q_id','grp','choice_idx']:
+    feature_names.remove(i)
+
+
+def fit_vectorizer(df: pd.DataFrame) -> DictVectorizer:
+    """
+    Fit a DictVectorizer to the data and return it
+    """
     numberer = DictVectorizer(sort=True, sparse=False)
-    numberer.fit(self.data[self.feature_names].to_dict("records"))
+    numberer.fit(df[feature_names].to_dict("records"))
     return numberer
 
-def get_matrix(self,numberer: DictVectorizer) -> np.ndarray:
-    return numberer.transform(self.data[self.feature_names].to_dict("records"))
+# helper functions to extract data in two cases:
+# first on the entire df: we want a transformed version of all the features to train with.
+def get_matrix(df: pd.DataFrame, numberer: DictVectorizer) -> np.ndarray:
+    """ Make an x matrix of all the features in df """
+    return numberer.transform(df[feature_names].to_dict("records"))
 
+def get_ys(df: pd.DataFrame) -> np.ndarray:
+    """ Give me the y """
+    return np.array(df['y'])
 
-def get_ys(self) -> np.ndarray:
-    """ Change this one to return a numpy array of the 'y' column"""
-    return np.array(self.data["y"])
-
-def get_qid_data(self, numberer: DictVectorizer, q_id: str) -> Tuple[np.ndarray,np.ndarray]:
+# second on a specific subsection of the df. we want a transfored version of all rows corresppondding with
+# a single q_id, and its listwise label for computing MRR
+def get_qid_data(df: pd.DataFrame, q_id: str, numberer: DictVectorizer, scaler: StandardScaler) -> Tuple[np.ndarray,np.ndarray]:
     """
-    Helps me commpute mean reciprocal rank later on, but without re-computing features.
+    Helps me compute mean reciprocal rank later on, but without re-computing features.
+    (Unfortunately I stil need to convert to a dict and then use DictVectorizer and sclaer on the dict).
     """
-    # assert(q_id in self.qids)
     # find the piece of the dataframe that i was talking about
-    slice = self.data[self.data.q_id == q_id]
-    # get features and labels into numpy format
-    X_slice = numberer.transform(slice[self.feature_names].to_dict("records"))
+    slice = df[df.q_id == q_id]
+    # get features and labels into numpy format -- transform with standard scaler
+    X_slice = fscale.transform(numberer.transform(slice[feature_names].to_dict("records")))
     y_slice = np.array(slice["y"])
     return X_slice, y_slice # pack and return them
-
-
 
 
 # helpers --
@@ -92,32 +113,30 @@ def safe_mean(input: List[float]) -> float:
         return 0.0
     return sum(input) / len(input)
 
-
-
 def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
-    """ helper because I've typed out these two lines 10000 times """
+    """ I've typed out these two lines 10_000 times so now it's one line """
     m_pred = m.predict_proba(X)[:, 1].ravel()
     return roc_auc_score(y_true=y, y_score=m_pred)
 
 
 # TODO fix these next
-numberer = train.fit_vectorizer()
+numberer = fit_vectorizer(train)
 fscale = StandardScaler()
-X_train = fscale.fit_transform(train.get_matrix(numberer))
-y_train = train.get_ys()
+X_train = fscale.fit_transform(get_matrix(train,numberer))
+y_train = get_ys(train)
 
-f = LogisticRegression()
+f: ClassifierMixin = LogisticRegression()
 f.fit(X_train, y_train)
 train_auc = auc(f,X_train,y_train) # how well did I memorize the training data
 
 
-X_vali = fscale.transform(vali.get_matrix(numberer))
-y_vali = vali.get_ys()
+X_vali = fscale.transform(get_matrix(vali,numberer))
+y_vali = get_ys(vali)
 vali_auc = auc(f,X_vali,y_vali)
 
+X_test = fscale.transform(get_matrix(test,numberer))
+y_test = get_ys(test)
 
-X_test = fscale.transform(test.get_matrix(numberer))
-y_test = test.get_ys()
 """
 test_pred = f.predict_proba(X_test)[:, 1].ravel()
 test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
@@ -145,7 +164,7 @@ class ExperimentResult: # fancy tuple with its own print function
             print(
                 "Feature Importances:",
                 sorted(
-                    zip(train.feature_names, self.model.feature_importances_), key=lambda tup: tup[1], reverse=True,
+                    zip(numberer.feature_names_, self.model.feature_importances_), key=lambda tup: tup[1], reverse=True,
                 ),
             )
         else:
@@ -154,7 +173,7 @@ class ExperimentResult: # fancy tuple with its own print function
 
 def tune_RF_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(4)): # random seed loop
+    for rnd in tqdm(range(n_rand)): # random seed loop
         for crit in ["gini", "entropy"]:
             for d in [8,16,32, None]:
                 params: Dict[str,str] = {
@@ -179,7 +198,7 @@ def tune_RF_model() -> ExperimentResult:
 
 def tune_MLP_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(4)): # random seed loop
+    for rnd in tqdm(range(n_rand)): # random seed loop
         for layer in [(32,), (16,16,), (16,16,16,)]:
             for activation in ['logistic','relu']:
                 params: Dict[str,str] = {
@@ -215,13 +234,13 @@ def calc_RR(sorted_item_list: List[bool]) -> float:
     return 1 / (sorted_item_list.index(True) + 1)
 
 
-def compute_clickout_RR(model: ClassifierMixin, data) -> List[float]:
+def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[float]:
     """
     Mean Reciprocal Rank:
     """
+    unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
-
-    for query_str in data.qids:  # 1. get all the clickout ids, which should be of the form session_id/step
+    for query_str in unique_query_ids:  # 1. get all the clickout ids, which should be of the form session_id/step
         """
         unpack = query_str.split("/")
 
@@ -237,8 +256,10 @@ def compute_clickout_RR(model: ClassifierMixin, data) -> List[float]:
 
         #Xs_query = [extract_features(queried_session, step, index) for index, _ in enumerate(o.impressions)]
         """
-        X_qid, y_qid = data.get_qid_data(numberer, query_str)
 
+        X_qid, y_qid = get_qid_data(data, query_str, numberer, fscale)
+
+        y_qid = y_qid.ravel()
         # extract features takes a session, a step, and a choice index.
         if True not in y_qid:
             continue
@@ -247,8 +268,7 @@ def compute_clickout_RR(model: ClassifierMixin, data) -> List[float]:
         # this outputs two values -- we want the probability of the second class ( found at index 1)
         qid_scores = model.predict_proba(X_qid)[:,1].ravel()
         # predict on features X and re-sort the items.. return a sorted list of item ids
-        impressions_shuffled = [i[0] for i in sorted(zip(y_qid, qid_scores), key=lambda tup: tup[1],reverse=True) ]
-
+        impressions_shuffled = [i[0] for i in sorted(zip(y_qid, qid_scores), key=lambda tup: tup[1],reverse=True)]
         rr = calc_RR(impressions_shuffled) # Score based upon the index where you found the relevant item.
         reciprocal_ranks.append(rr)
         # we don't quite care about the real choice in creating features here
