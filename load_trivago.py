@@ -42,16 +42,8 @@ from tqdm import tqdm
 
 from dataclasses import dataclass
 
-# sklearn. I want this ML experimentation in a different file really
-from sklearn.feature_extraction import DictVectorizer
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 
-# models --
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.base import ClassifierMixin
 
 # helpers --
 def safe_mean(input: List[float]) -> float:
@@ -137,8 +129,6 @@ class Session:
         return new_session
 
 
-
-
 @dataclass
 class UserProfile:
     user_id: str
@@ -150,21 +140,8 @@ class UserProfile:
 @dataclass
 class SessionData:
     data: pd.DataFrame
-    examples: List[Dict[str,str]]
-    labels: List[bool]
     qids: List[str]
-
-    def fit_vectorizer(self) -> DictVectorizer:
-        numberer = DictVectorizer(sort=True, sparse=False)
-        numberer.fit(self.examples)
-        return numberer
-
-    def get_matrix(self, numberer: DictVectorizer) -> np.ndarray:
-        return numberer.transform(self.examples)
-
-
-    def get_ys(self) -> np.ndarray:
-        return np.array(self.labels)
+    feature_names: List[str]
 
     def get_session(self, session_id: str) -> Session:
         """
@@ -243,8 +220,8 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         # user-item or item-item features --
         # roll through the previous items interacted in the session and average their jaccard similarity to the current item
         "item_item_sim": safe_mean(hotel_sims),
-        "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0.0,
-        "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0.0,
+        "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0,
+        "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
         "unique_item_interact_by_user": unique_item_sim
         #"time_since_last_interact_this_item":1
@@ -269,9 +246,11 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
 
     print("Rolling through ({}) sessions/creating labeled feature vectors for {} sessions".format(len(sessions), what))
 
-    Xs: List[Dict[str,str]] = []
-    ys: List[bool] = []
+    examples: List[Dict[str,str]] = []
     qids: List[str] = []
+
+
+    features: Dict[str,Any]
 
     for s in tqdm(sessions): # for each session -- --
         for step, o in enumerate(s.interactions): # for each interaction in the session
@@ -285,13 +264,13 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
                         label = (choice == o.action_on)
 
                         features = extract_features(s,step,index) # feature extraction needs session, interaction info, and
+                        q_id = "{}/{}".format(s.session_id, step)
+                        qids.append(q_id)
+                        examples.append({"q_id": q_id, "choice_idx":index, **features, "y":label})
 
-                        qids.append("{}/{}".format(s.session_id, step))
-                        Xs.append(features)
-                        ys.append(label)
 
-
-    return SessionData(pd.DataFrame(), Xs,ys, qids)
+    feature_names: List[str] = [i for i in features.keys()]
+    return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)
 
 
 def load_session_dict(what: str) -> Dict[str,Session]:
@@ -360,177 +339,14 @@ train = collect("train",session_ids_train) # create_examples=0.1
 vali = collect("vali",session_ids_vali)
 test = collect("test",session_ids_test)
 
-# dump dataset and put this in a different file
-from sklearn.linear_model import LogisticRegression
 
+train.data["grp"] = 0
+vali.data["grp"]  = 1
+test.data["grp"]  = 2
 
-def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
-    """ helper because I've typed out these two lines 10000 times """
-    m_pred = m.predict_proba(X)[:, 1].ravel()
-    return roc_auc_score(y_true=y, y_score=m_pred)
+frames: List[pd.DataFrame] = [train.data, vali.data, test.data]
+df_out = pd.concat(frames)
+print(df_out)
 
-numberer = train.fit_vectorizer()
-fscale = StandardScaler()
-
-X_train = fscale.fit_transform(train.get_matrix(numberer))
-y_train = train.get_ys()
-
-f = LogisticRegression()
-f.fit(X_train, y_train)
-train_auc = auc(f,X_train,y_train) # how well did I memorize the training data
-
-
-X_vali = fscale.fit_transform(vali.get_matrix(numberer))
-y_vali = vali.get_ys()
-vali_auc = auc(f,X_vali,y_vali)
-
-
-X_test = fscale.fit_transform(test.get_matrix(numberer))
-y_test = test.get_ys()
-"""
-test_pred = f.predict_proba(X_test)[:, 1].ravel()
-test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
-"""
-
-# how well did my model learn the data
-print("\n---Data Shape---")
-print("train shape: {}\n vali shape {}\n test shape {}\n".format(str(X_train.shape),str(X_vali.shape),str(X_test.shape)))
-print("train AUC: {:3f}\n vali AUC {:3f}".format(train_auc,vali_auc))
-
-@dataclass
-class ExperimentResult: # fancy tuple with its own print function
-    model: ClassifierMixin
-    params: Dict[str,str]
-    # metrics
-    train_auc: float
-    vali_auc: float
-    mrr_train: float
-    mrr_vali: float
-
-    def outputs(self) -> None:
-        print("Model params",self.params)
-        print("Results\n-------\n train_auc: {:3f}\nmrr_train: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.mrr_train,self.vali_auc,self.mrr_vali))
-        if hasattr(self.model, 'feature_importances_'):
-            print(
-                "Feature Importances:",
-                sorted(
-                    zip(numberer.feature_names_, self.model.feature_importances_), key=lambda tup: tup[1], reverse=True,
-                ),
-            )
-        else:
-            print("Not explainable.")
-
-
-def tune_RF_model() -> ExperimentResult:
-    experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(4)): # random seed loop
-        for crit in ["gini", "entropy"]:
-            for d in [8,16,32, None]:
-                params: Dict[str,str] = {
-                    "random_state": RANDOM_SEED + rnd,
-                    "criterion": crit,
-                    "max_depth": d,
-                }
-                m = RandomForestClassifier(**params)
-                m.fit(X_train, y_train)
-
-                train_auc = auc(m,X_train,y_train)
-                vali_auc = auc(m,X_vali,y_vali)
-
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
-                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
-                experiments.append(result)
-
-
-    return max(experiments, key = lambda tup: tup.mrr_vali)
-
-def tune_MLP_model() -> ExperimentResult:
-    experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(4)): # random seed loop
-        for layer in [(32,), (16,16,), (16,16,16,)]:
-            for activation in ['logistic','relu']:
-                params: Dict[str,str] = {
-                    "hidden_layer_sizes": layer,
-                    "random_state": RANDOM_SEED + rnd,
-                    "activation":activation,
-                    "solver": "lbfgs",
-                    "max_iter": 1e4,
-                    "alpha": 0.0001,
-                }
-                m = MLPClassifier(**params)
-
-                m.fit(X_train, y_train)
-
-                train_auc = auc(m,X_train,y_train)
-                vali_auc = auc(m,X_vali,y_vali)
-
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
-                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
-                experiments.append(result)
-
-    return max(experiments, key = lambda tup: tup.mrr_vali)
-
-
-# ok now evaluate the model on the metric that we care about: Mean Reciprocal Rank (MRR)
-def calc_RR(sorted_item_list: List[str], id: str) -> float:
-    assert(id in sorted_item_list)
-    return 1 / (sorted_item_list.index(id) + 1)
-
-
-def compute_clickout_RR(model: ClassifierMixin, data: SessionData) -> List[float]:
-    """
-    Mean Reciprocal Rank:
-    """
-    reciprocal_ranks: List[float] = []
-
-    for x_idx, query_str in enumerate(data.qids):  # 1. get all the clickout ids, which should be of the form session_id/step
-        unpack = query_str.split("/")
-        session_id = unpack[0]
-        step = int(unpack[1])
-        # get_true_y -- true_y is an item id or I could set it up as a rank
-        queried_session = data.get_session(session_id) # queried session
-        o = queried_session.interactions[step]
-
-        true_y = o.action_on
-        if true_y not in o.impressions: # sometimes action_on is missing from the test set
-            continue
-        Xs_query = [extract_features(queried_session, step, index) for index, _ in enumerate(o.impressions)]
-        # extract features takes a session, a step, and a choice index.
-
-        X_qid = fscale.transform(numberer.transform(Xs_query))
-        # this outputs two values -- we want the
-        qid_scores = model.predict_proba(X_qid)[:,1].ravel()
-        # predict on features X and re-sort the items.. return a sorted list of item ids
-        impressions_shuffled = [i[0] for i in sorted(zip(o.impressions, qid_scores), key=lambda tup: tup[1],reverse=True) ]
-
-        rr = calc_RR(impressions_shuffled,true_y)
-        reciprocal_ranks.append(rr)
-        # we don't quite care about the real choice in creating features here
-        # because we're not evaluating click accuracy, we're using a listwise metric
-
-        # Score based upon the index you found the relevant item.
-    return reciprocal_ranks
-
-MRR_train = safe_mean(compute_clickout_RR(f,train))
-MRR_vali = np.mean(compute_clickout_RR(f,vali))
-print("MRR_train: {:3f}\nMRR_vali: {:3f}".format(MRR_train,MRR_vali))
-
-
-
-print("trying a bunch of RF models")
-rf = tune_RF_model()
-rf.outputs()
-
-print("and some MLP classifiers")
-nn = tune_MLP_model()
-nn.outputs()
-
-
-test_mrr_rf = safe_mean(compute_clickout_RR(rf.model,test))
-test_mrr_nn = safe_mean(compute_clickout_RR(nn.model,test))
-
-print("EXPERIMENTS:\nrf test_MRR:{:3f}\nnn test_MRR:{:3f}".format(test_mrr_rf,test_mrr_nn))
+# dump dataset and put my experiments in a different file
+df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
