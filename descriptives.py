@@ -28,19 +28,8 @@ counts = pd.merge(sessions,interactions,how='outer',left_index=True,right_index=
 
 
 print("n_users in dataset {}".format(counts.shape[0]))
-print("n_users with more than one session: {}".format(counts[counts.sessions > 1].shape[0]))
-print("n_users with more than 99 interactions: {}".format(counts[counts.interactions > 99].shape[0]))
-
-
-# of those in the test set, how many benefit from an existing user profile?
-df = pd.read_csv("data/trivago/test.csv")
-ids = list(df["user_id"].unique())
-
-print("Unique users in test set: {}".format(len(ids)))
-
-ids_w_profile = [i for i in ids if i in counts.index]
-print("Users in test set who benefit from a user profile: {} ".format(len(ids_w_profile)))
-
-
-
-#
+print("")
+for i in range(1,6):
+    print("n_users with more than {} session(s): {}".format(i,counts[counts.sessions > i].shape[0]))
+    v = 100*i - 1
+    print("n_users with more than {} interactions: {}\n".format(v,counts[counts.interactions > v].shape[0]))
