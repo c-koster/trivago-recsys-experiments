@@ -13,6 +13,7 @@ yield the best MRR on the validation set
 
 4. evaluate the best ones on the test set
 """
+# srun --pty /bin/bash
 
 from typing import Dict, List, Set, Optional, Any, Tuple
 from tqdm import tqdm
@@ -40,12 +41,12 @@ RANDOM_SEED = 42
 n_rand = 2
 
 data_all = pd.read_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-print("loaded data")
+print("loaded data",flush=True)
 # split the data back into three frames
 train = data_all[data_all.grp == 0]
 vali = data_all[data_all.grp == 1]
 test = data_all[data_all.grp == 2]
-print("split data")
+print("split data",flush=True)
 feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
 
 
@@ -78,7 +79,7 @@ def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
 fscale = StandardScaler()
 X_train = fscale.fit_transform(train[feature_names])
 y_train = train["y"].array
-print("Fit the StandardScaler")
+print("Fit the StandardScaler",flush=True)
 
 f: ClassifierMixin = LogisticRegression()
 f.fit(X_train, y_train)
@@ -232,4 +233,4 @@ nn.outputs()
 test_mrr_rf = safe_mean(compute_clickout_RR(rf.model,test))
 test_mrr_nn = safe_mean(compute_clickout_RR(nn.model,test))
 
-print("EXPERIMENTS:\nrf test_MRR: {:3f}\nnn test_MRR: {:3f}".format(test_mrr_rf,test_mrr_nn))
+print("EXPERIMENTS:\nrf test_MRR: {:3f}\nnn test_MRR: {:3f}".format(test_mrr_rf,test_mrr_nn),flush=True)
