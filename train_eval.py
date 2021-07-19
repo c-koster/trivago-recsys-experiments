@@ -47,7 +47,7 @@ train = data_all[data_all.grp == 0]
 vali = data_all[data_all.grp == 1]
 test = data_all[data_all.grp == 2]
 print("split data",flush=True)
-feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
+feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx", "is_advantaged_user"])
 
 
 # second on a specific subsection of the df. we want a transfored version of all rows corresppondding with
@@ -93,10 +93,6 @@ vali_auc = auc(f,X_vali,y_vali)
 X_test = fscale.transform(test[feature_names])
 y_test = test["y"].array
 
-"""
-test_pred = f.predict_proba(X_test)[:, 1].ravel()
-test_auc = roc_auc_score(y_true=y_test, y_score=test_pred)
-"""
 
 # how well did my model learn the data
 print("\n---Data Shape---")
@@ -219,8 +215,16 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
 
 MRR_train = safe_mean(compute_clickout_RR(f,train))
 MRR_vali = safe_mean(compute_clickout_RR(f,vali))
-print("MRR_train: {:3f}\nMRR_vali: {:3f}".format(MRR_train,MRR_vali))
+print("MRR_train: {:3f}\nMRR_vali: {:3f}\n".format(MRR_train,MRR_vali))
 
+test_adv = test[test.is_advantaged_user == 1]
+test_disadv = test[test.is_advantaged_user == 0]
+MRR_test_adv = safe_mean(compute_clickout_RR(f,test_adv))
+MRR_test_disadv = safe_mean(compute_clickout_RR(f,test_disadv))
+print("LR results on test set, split by n_sessions in a given user's profile")
+print("MRR_advantaged: {}\nMRR_disadvantaged: {}".format(MRR_test_adv,MRR_test_disadv))
+
+exit(0)
 print("trying a bunch of RF models")
 rf = tune_RF_model()
 rf.outputs()

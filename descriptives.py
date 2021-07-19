@@ -14,7 +14,7 @@ as follows.
 # there are. this means users with d > 100 interactions (or try some other way to slice)
 import pandas as pd
 
-df = pd.read_csv("data/trivago/train.csv")
+df = pd.read_csv("data/trivago/train.csv",nrows=1000)
 
 interactions_series = df["user_id"].value_counts()
 interactions = interactions_series.to_frame(name="interactions")

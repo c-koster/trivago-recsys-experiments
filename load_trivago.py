@@ -203,7 +203,6 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
     user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if session.user_id in users.keys() else [0]
     unique_item_sim = safe_mean(user_hotel_unique_sims)
     features: Dict[str,Any] = { #type:ignore
-
         # these are cheating, remove eventually --
         "diff_now_end": len(session.interactions) - step,
         # session-based features
@@ -223,8 +222,8 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0,
         "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
-        "unique_item_interact_by_user": unique_item_sim
-        #"time_since_last_interact_this_item":1
+        "unique_item_interact_by_user": unique_item_sim,
+        "is_advantaged_user": 0 if session.user_id not in users.keys() else 1 if len(users[session.user_id].sessions) > 2 else 0
     }
     return features
 
@@ -282,7 +281,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
