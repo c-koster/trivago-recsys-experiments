@@ -37,15 +37,15 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
 
 RANDOM_SEED = 42
-n_rand = 1
+n_rand = 2
 
 data_all = pd.read_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-
+print("loaded data")
 # split the data back into three frames
 train = data_all[data_all.grp == 0]
 vali = data_all[data_all.grp == 1]
 test = data_all[data_all.grp == 2]
-
+print("split data")
 feature_names: Set[str] = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
 
 
@@ -78,6 +78,7 @@ def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
 fscale = StandardScaler()
 X_train = fscale.fit_transform(train[feature_names])
 y_train = train["y"].array
+print("Fit the StandardScaler")
 
 f: ClassifierMixin = LogisticRegression()
 f.fit(X_train, y_train)
@@ -195,7 +196,7 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
     unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
     for query_str in unique_query_ids:  # 1. get all the clickout ids, which should be of the form session_id/step
-        
+
         X_qid, y_qid = get_qid_data(data, query_str, fscale)
 
         y_qid = y_qid.ravel()
