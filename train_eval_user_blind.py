@@ -28,5 +28,5 @@ counts = pd.merge(sessions,interactions,how='outer',left_index=True,right_index=
 
 
 print("n_users in dataset {}".format(counts.shape[0]))
-print("n_users with more than two sessions: {}".format(counts[counts.sessions > 2].shape[0]))
+print("n_users with more than one session: {}".format(counts[counts.sessions > 1].shape[0]))
 print("n_users with more than 99 interactions: {}".format(counts[counts.interactions > 99].shape[0]))
