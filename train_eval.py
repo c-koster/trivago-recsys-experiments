@@ -195,22 +195,7 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
     unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
     for query_str in unique_query_ids:  # 1. get all the clickout ids, which should be of the form session_id/step
-        """
-        unpack = query_str.split("/")
-
-        session_id = unpack[0]
-        step = int(unpack[1])
-        # get_true_y -- true_y is an item id or I could set it up as a rank
-        queried_session = data.get_session(session_id) # queried session
-        o = queried_session.interactions[step]
-
-        true_y = o.action_on
-        if true_y not in o.impressions: # sometimes action_on is missing from the test set
-            continue
-
-        #Xs_query = [extract_features(queried_session, step, index) for index, _ in enumerate(o.impressions)]
-        """
-
+        
         X_qid, y_qid = get_qid_data(data, query_str, fscale)
 
         y_qid = y_qid.ravel()
