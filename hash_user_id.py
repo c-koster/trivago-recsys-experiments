@@ -1,14 +1,13 @@
 """
 Second experiment:
 
-We think our user-aware recommender system is pretty powerful. But what happens when we pretend ?
-
+We think our user-aware recommender system is pretty powerful. But what happens when we pretend
+that all users are unique, and rely on session context/item context alone for making recommendations?
 
 This will be annswered in the second experiment file -- but first we have to make identical
-train/test.csv files with re-coded user_ids to pretend that each session comes from a 'new
-user', aka 1 user id per 1 session.
+train/test.csv files with re-coded user_ids to pretend that each session comes from a 'new user'.
 
-Do this by setting the user id to the hash of the session_id.
+I do this by setting the user id to the hash of the session_id.
 """
 from hashlib import md5
 import pandas as pd
