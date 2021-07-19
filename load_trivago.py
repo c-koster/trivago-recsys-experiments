@@ -348,5 +348,5 @@ df_out = pd.concat(frames)
 print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
-df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
+df_out.to_parquet("data/trivago/data_all_labels.parquet", engine="pyarrow")
 print("Done!")
