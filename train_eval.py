@@ -46,7 +46,7 @@ train = data_all[data_all.grp == 0]
 vali = data_all[data_all.grp == 1]
 test = data_all[data_all.grp == 2]
 print("split data")
-feature_names: Set[str] = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
+feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
 
 
 # second on a specific subsection of the df. we want a transfored version of all rows corresppondding with
