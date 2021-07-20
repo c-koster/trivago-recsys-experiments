@@ -37,6 +37,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
 
+import joblib
+
 RANDOM_SEED = 42
 n_rand = 3
 
@@ -82,8 +84,8 @@ y_test = test["y"].array
 
 # how well did my model learn the data
 print("\n---Data Shape---")
-print("train shape: {}\n vali shape {}\n test shape {}\n".format(str(X_train.shape),str(X_vali.shape),str(X_test.shape)))
-print("train AUC: {:3f}\n vali AUC {:3f}".format(train_auc,vali_auc),flush=True)
+print("train shape: {}\nvali shape: {}\ntest shape: {}\n".format(str(X_train.shape),str(X_vali.shape),str(X_test.shape)))
+print("train AUC: {:3f}\nvali AUC {:3f}".format(train_auc,vali_auc),flush=True)
 
 @dataclass
 class ExperimentResult: # fancy tuple with its own print function
@@ -92,12 +94,12 @@ class ExperimentResult: # fancy tuple with its own print function
     # metrics
     train_auc: float
     vali_auc: float
-    mrr_train: float
-    mrr_vali: float
+    #mrr_train: float
+    vali_mrr: float
 
     def outputs(self) -> None:
         print("Model params:",self.params)
-        print("Results\n-------\n train_auc: {:3f}\nmrr_train: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.mrr_train,self.vali_auc,self.mrr_vali))
+        print("Results\n-------\n train_auc: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.vali_auc,self.vali_mrr))
         if hasattr(self.model, 'feature_importances_'):
             print(
                 "Feature Importances:",
@@ -107,6 +109,9 @@ class ExperimentResult: # fancy tuple with its own print function
             )
         else:
             print("Not explainable.")
+
+    def dump(self,filename: str) -> None:
+        joblib.dump(self.model, '{}.joblib'.format(filename))
 
 
 def tune_RF_model() -> ExperimentResult:
@@ -125,14 +130,14 @@ def tune_RF_model() -> ExperimentResult:
                 train_auc = auc(m,X_train,y_train)
                 vali_auc = auc(m,X_vali,y_vali)
 
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
+                #train_mrr = safe_mean(compute_clickout_RR(m,train))
                 vali_mrr = safe_mean(compute_clickout_RR(m,vali))
 
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
+                result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
                 experiments.append(result)
 
 
-    return max(experiments, key = lambda tup: tup.mrr_vali)
+    return max(experiments, key = lambda tup: tup.vali_mrr)
 
 def tune_MLP_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
@@ -154,13 +159,13 @@ def tune_MLP_model() -> ExperimentResult:
                 train_auc = auc(m,X_train,y_train)
                 vali_auc = auc(m,X_vali,y_vali)
 
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
+                #train_mrr = safe_mean(compute_clickout_RR(m,train))
                 vali_mrr = safe_mean(compute_clickout_RR(m,vali))
 
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
+                result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
                 experiments.append(result)
 
-    return max(experiments, key = lambda tup: tup.mrr_vali)
+    return max(experiments, key = lambda tup: tup.vali_mrr)
 
 
 # ok now evaluate the model on the metric that we care about: Mean Reciprocal Rank (MRR)
@@ -179,7 +184,6 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
     """
     #unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
-
     grouped = data.groupby("q_id")
     for query_str, query in grouped: # loop over each query that i just grouped. Each iteration is a (q_id, DataFrame) pair
 
@@ -223,12 +227,7 @@ print("MRR_advantaged: {:3f}\nMRR_disadvantaged: {:3f}\nMRR_all: {:3f}\n".format
 print("trying a bunch of RF models")
 rf = tune_RF_model()
 rf.outputs()
-
-print("and some MLP classifiers")
-nn = tune_MLP_model()
-nn.outputs()
-
-
+rf.dump("forest")
 # random forest listwise stats over the test set
 test_adv_ranks_rf = compute_clickout_RR(rf.model,test_adv)
 test_disadv_ranks_rf = compute_clickout_RR(rf.model,test_disadv)
@@ -240,8 +239,14 @@ MRR_test_disadv_rf = safe_mean(test_disadv_ranks_rf)
 MRR_test_all_rf = safe_mean(test_adv_ranks_rf + test_disadv_ranks_rf)
 
 rf_results = {"all": MRR_test_all_rf, "adv": MRR_test_adv_rf, "dis": MRR_test_disadv_rf}
-print("\nRF TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}".format(**rf_results))
+print("\nRF TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}\n\n".format(**rf_results))
 
+
+
+print("and some MLP classifiers")
+nn = tune_MLP_model()
+nn.outputs()
+nn.dump("mlp")
 # same but for the MLP/nn
 test_adv_ranks_nn = compute_clickout_RR(nn.model,test_adv)
 test_disadv_ranks_nn = compute_clickout_RR(nn.model,test_disadv)
