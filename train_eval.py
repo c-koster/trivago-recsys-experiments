@@ -83,7 +83,7 @@ y_test = test["y"].array
 # how well did my model learn the data
 print("\n---Data Shape---")
 print("train shape: {}\n vali shape {}\n test shape {}\n".format(str(X_train.shape),str(X_vali.shape),str(X_test.shape)))
-print("train AUC: {:3f}\n vali AUC {:3f}".format(train_auc,vali_auc))
+print("train AUC: {:3f}\n vali AUC {:3f}".format(train_auc,vali_auc),flush=True)
 
 @dataclass
 class ExperimentResult: # fancy tuple with its own print function
@@ -179,18 +179,19 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
     """
     #unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
-    grouped = data.groupby("q_id")
 
-    for query_str, query in grouped:  # 1. get all the clickout ids, which should be of the form session_id/step
+    grouped = data.groupby("q_id")
+    for query_str, query in grouped: # loop over each query that i just grouped. Each iteration is a (q_id, DataFrame) pair
 
         y_qid = np.array(query["y"]).ravel()
         X_qid = fscale.transform(query[feature_names])
 
-        if True not in y_qid:
+        if True not in y_qid: # if this example is unlabeled -- then we should skip it.
             continue
 
-        # this outputs two values -- we want the probability of the second class ( found at index 1)
+        # this outputs two values -- we want the probability of the second class (found at each row of  index 1 in this matrix)
         qid_scores = model.predict_proba(X_qid)[:,1].ravel()
+
         # predict on features X and re-sort the items.. return a sorted list of item ids
         impressions_shuffled = [i[0] for i in sorted(zip(y_qid, qid_scores), key=lambda tup: tup[1],reverse=True)]
         rr = calc_RR(impressions_shuffled) # Score based upon the index where you found the relevant item.
@@ -240,7 +241,6 @@ MRR_test_all_rf = safe_mean(test_adv_ranks_rf + test_disadv_ranks_rf)
 
 rf_results = {"all": MRR_test_all_rf, "adv": MRR_test_adv_rf, "dis": MRR_test_disadv_rf}
 print("\nRF TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}".format(**rf_results))
-
 
 # same but for the MLP/nn
 test_adv_ranks_nn = compute_clickout_RR(nn.model,test_adv)
