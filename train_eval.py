@@ -38,7 +38,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
 
 RANDOM_SEED = 42
-n_rand = 2
+n_rand = 3
 
 data_all = pd.read_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 print("loaded data",flush=True)
@@ -49,20 +49,6 @@ test = data_all[data_all.grp == 2]
 print("split data",flush=True)
 feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx", "is_advantaged_user"])
 
-
-# second on a specific subsection of the df. we want a transfored version of all rows corresppondding with
-# a single q_id, and its listwise label for computing MRR
-def get_qid_data(df: pd.DataFrame, q_id: str, scaler: StandardScaler) -> Tuple[np.ndarray,np.ndarray]:
-    """
-    Helps me compute mean reciprocal rank later on, but without re-computing features.
-    (Unfortunately I stil need to convert to a dict and then use DictVectorizer and sclaer on the dict).
-    """
-    # find the piece of the dataframe that i was talking about
-    slice = df[df.q_id == q_id]
-    # get features and labels into numpy format -- transform with standard scaler
-    X_slice = fscale.transform(slice[feature_names])
-    y_slice = np.array(slice["y"])
-    return X_slice, y_slice # pack and return them
 
 # helpers --
 def safe_mean(input: List[float]) -> float:
@@ -110,13 +96,13 @@ class ExperimentResult: # fancy tuple with its own print function
     mrr_vali: float
 
     def outputs(self) -> None:
-        print("Model params",self.params)
+        print("Model params:",self.params)
         print("Results\n-------\n train_auc: {:3f}\nmrr_train: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.mrr_train,self.vali_auc,self.mrr_vali))
         if hasattr(self.model, 'feature_importances_'):
             print(
                 "Feature Importances:",
                 sorted(
-                    zip(feature_names, self.model.feature_importances_), key=lambda tup: tup[1], reverse=True,
+                    zip(feature_names, [int(1000*i) for i in self.model.feature_importances_]), key=lambda tup: tup[1], reverse=True,
                 ),
             )
         else:
@@ -186,21 +172,22 @@ def calc_RR(sorted_item_list: List[bool]) -> float:
     return 1 / (sorted_item_list.index(True) + 1)
 
 
+
 def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[float]:
     """
     Mean Reciprocal Rank:
     """
-    unique_query_ids: List[str] = list(data.q_id.unique())
+    #unique_query_ids: List[str] = list(data.q_id.unique())
     reciprocal_ranks: List[float] = []
-    for query_str in unique_query_ids:  # 1. get all the clickout ids, which should be of the form session_id/step
+    grouped = data.groupby("q_id")
 
-        X_qid, y_qid = get_qid_data(data, query_str, fscale)
+    for query_str, query in grouped:  # 1. get all the clickout ids, which should be of the form session_id/step
 
-        y_qid = y_qid.ravel()
-        # extract features takes a session, a step, and a choice index.
+        y_qid = np.array(query["y"]).ravel()
+        X_qid = fscale.transform(query[feature_names])
+
         if True not in y_qid:
             continue
-        #assert(list(y_qid).index(True) == o.impressions.index(o.action_on))
 
         # this outputs two values -- we want the probability of the second class ( found at index 1)
         qid_scores = model.predict_proba(X_qid)[:,1].ravel()
@@ -213,18 +200,25 @@ def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[floa
 
     return reciprocal_ranks
 
+
 MRR_train = safe_mean(compute_clickout_RR(f,train))
 MRR_vali = safe_mean(compute_clickout_RR(f,vali))
 print("MRR_train: {:3f}\nMRR_vali: {:3f}\n".format(MRR_train,MRR_vali))
 
 test_adv = test[test.is_advantaged_user == 1]
 test_disadv = test[test.is_advantaged_user == 0]
-MRR_test_adv = safe_mean(compute_clickout_RR(f,test_adv))
-MRR_test_disadv = safe_mean(compute_clickout_RR(f,test_disadv))
-print("LR results on test set, split by n_sessions in a given user's profile")
-print("MRR_advantaged: {}\nMRR_disadvantaged: {}".format(MRR_test_adv,MRR_test_disadv))
 
-exit(0)
+# get the reciprocal ranks for all clickouts in each dataset
+test_adv_ranks = compute_clickout_RR(f,test_adv)
+test_disadv_ranks = compute_clickout_RR(f,test_disadv)
+
+MRR_test_adv = safe_mean(test_adv_ranks)
+MRR_test_disadv = safe_mean(test_disadv_ranks)
+MRR_test_all = safe_mean(test_adv_ranks + test_disadv_ranks)
+print("LR results on test set, split by n_sessions in a given user's profile")
+print("MRR_advantaged: {:3f}\nMRR_disadvantaged: {:3f}\nMRR_all: {:3f}\n".format(MRR_test_adv, MRR_test_disadv, MRR_test_all))
+
+
 print("trying a bunch of RF models")
 rf = tune_RF_model()
 rf.outputs()
@@ -234,7 +228,27 @@ nn = tune_MLP_model()
 nn.outputs()
 
 
-test_mrr_rf = safe_mean(compute_clickout_RR(rf.model,test))
-test_mrr_nn = safe_mean(compute_clickout_RR(nn.model,test))
+# random forest listwise stats over the test set
+test_adv_ranks_rf = compute_clickout_RR(rf.model,test_adv)
+test_disadv_ranks_rf = compute_clickout_RR(rf.model,test_disadv)
 
-print("EXPERIMENTS:\nrf test_MRR: {:3f}\nnn test_MRR: {:3f}".format(test_mrr_rf,test_mrr_nn),flush=True)
+# do this so I don't evaluate the whole test set separately from the subdivided
+# test  set -- MRR takes a while to compute
+MRR_test_adv_rf = safe_mean(test_adv_ranks_rf)
+MRR_test_disadv_rf = safe_mean(test_disadv_ranks_rf)
+MRR_test_all_rf = safe_mean(test_adv_ranks_rf + test_disadv_ranks_rf)
+
+rf_results = {"all": MRR_test_all_rf, "adv": MRR_test_adv_rf, "dis": MRR_test_disadv_rf}
+print("\nRF TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}".format(**rf_results))
+
+
+# same but for the MLP/nn
+test_adv_ranks_nn = compute_clickout_RR(nn.model,test_adv)
+test_disadv_ranks_nn = compute_clickout_RR(nn.model,test_disadv)
+
+MRR_test_adv_nn = safe_mean(test_adv_ranks_nn)
+MRR_test_disadv_nn = safe_mean(test_disadv_ranks_nn)
+MRR_test_all_nn = safe_mean(test_adv_ranks_nn + test_disadv_ranks_nn)
+
+nn_results = {"all": MRR_test_all_nn, "adv": MRR_test_adv_nn, "dis": MRR_test_disadv_nn}
+print("\nNN TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}".format(**nn_results))

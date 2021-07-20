@@ -280,7 +280,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     assert(what in ["train","test"])
 
     sessions: List[Session] = []
-    # s=1_000 for my laptop's sake
+    # nrows=1_000 for my laptop's sake
     df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
@@ -348,5 +348,5 @@ df_out = pd.concat(frames)
 print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
-df_out.to_parquet("data/trivago/data_all_labels.parquet", engine="pyarrow")
+df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 print("Done!")
