@@ -124,7 +124,7 @@ def tune_RF_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
     for rnd in tqdm(range(n_rand)): # random seed loop
         for crit in ["gini", "entropy"]:
-            for d in [4,8,10]:
+            for d in [4,7,11]:
                 params: Dict[str,str] = {
                     "random_state": RANDOM_SEED + rnd,
                     "criterion": crit,
@@ -148,7 +148,7 @@ def tune_RF_model() -> ExperimentResult:
 def tune_MLP_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
     for rnd in tqdm(range(n_rand)): # random seed loop
-        for layer in [(32,), (16,16,), (16,16,16,)]:
+        for layer in [(32,), (16,16,)]:
             for activation in ['logistic','relu']:
                 params: Dict[str,str] = {
                     "hidden_layer_sizes": layer,
