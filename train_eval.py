@@ -12,6 +12,12 @@ vali and test.
 yield the best MRR on the validation set
 
 4. evaluate the best ones on the test set
+
+
+---Data Shape---
+train shape: (32_717_839, 13)
+ vali shape (3642791, 13)
+ test shape (6_379_060, 13)
 """
 # srun --pty /bin/bash
 
@@ -118,7 +124,7 @@ def tune_RF_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
     for rnd in tqdm(range(n_rand)): # random seed loop
         for crit in ["gini", "entropy"]:
-            for d in [8,16,32, None]:
+            for d in [4,8,10]:
                 params: Dict[str,str] = {
                     "random_state": RANDOM_SEED + rnd,
                     "criterion": crit,
