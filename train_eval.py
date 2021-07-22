@@ -129,6 +129,7 @@ def tune_RF_model() -> ExperimentResult:
                     "random_state": RANDOM_SEED + rnd,
                     "criterion": crit,
                     "max_depth": d,
+                    "n_estimators": 5,
                 }
                 m = RandomForestClassifier(**params)
                 m.fit(X_train, y_train)
