@@ -2,3 +2,4 @@ ms-recommenders
 cornac
 pandas
 pyarrow
+lightgbm

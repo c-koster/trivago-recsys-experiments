@@ -30,7 +30,6 @@ RANDOM_SEED = 42
 import csv
 from os import path
 import random
-#from datetime import datetime
 
 # matrix
 import pandas as pd
@@ -175,7 +174,7 @@ def create_session(df: List[Dict[str,str]]) -> Session:
     return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list)
 
 
-def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,Any]:
+def extract_features(session: Session, step: int, choice_idx: int, is_blind: bool) -> Dict[str,Any]:
     """
     Feature extraction for one session step of action type 'clicked out'
     """
@@ -198,19 +197,23 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         #print("Key Error... {} does not exist in our dict".format(current_choice_id))
 
 
+    user_exists: bool = not is_blind
+    if session.user_id not in users.keys():
+        user_exists = False
+
     hotel_sims = [hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]
 
-    user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if session.user_id in users.keys() else [0]
-    unique_item_sim = safe_mean(user_hotel_unique_sims)
+    user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
+
     features: Dict[str,Any] = { #type:ignore
-        # these are cheating, remove eventually --
-        "diff_now_end": len(session.interactions) - step,
         # session-based features
         "time_since_start": current_timestamp - session.start,
         "time_since_last_clickout": current_timestamp - last_clickout.timestamp if last_clickout else 0,
         "diff_price_mean": current_price - safe_mean(session.interactions[step].prices),
         "last_price_diff": current_price - last_clickout.prices[last_clickout.get_clicked_idx()] if last_clickout else 0,
         "reciprocal_choice_rank": 1 / (choice_idx + 1), # rank starts at 1 index starts at
+        # person clicks 1 then 4... maybe they will try 7 next
+        "predicted_next_click": 2 * last_clickout.get_clicked_idx() - prev_clickouts[-2].get_clicked_idx() + 1 if len(prev_clickouts) > 1 else last_clickout.get_clicked_idx() + 2 if last_clickout else 1,
         # position to previous clickout position
         "delta_position_last_position": (choice_idx) - last_clickout.get_clicked_idx() if last_clickout else 0,
         # z-score (?) difference between price and average price of clicked hotels
@@ -222,14 +225,15 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0,
         "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
-        "unique_item_interact_by_user": unique_item_sim,
-        "is_advantaged_user": 0 if session.user_id not in users.keys() else 1 if len(users[session.user_id].sessions) > 2 else 0
+        "unique_item_interact_by_user_avg": safe_mean(user_hotel_unique_sims),
+        "unique_item_interact_by_user_max": max(user_hotel_unique_sims),
+        "unique_item_interact_by_user_min": min(user_hotel_unique_sims),
     }
     return features
 
 
 
-def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> SessionData:
+def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_blind: bool = False) -> SessionData:
     """
     This function takes as input a filename and will return a SessionData object containing
     a list of clickout features, a list of labels, and methods to convert each into matrices.
@@ -262,7 +266,10 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
                     for index, choice in enumerate(o.impressions):
                         label = (choice == o.action_on)
 
-                        features = extract_features(s,step,index) # feature extraction needs session, interaction info, and
+                        # feature extraction needs session, interaction info, and the index we were wondering about.
+                        # we also pass whether we want to ignore user features. (defaults to false)
+                        features = extract_features(s,step,index,is_blind)
+                        features["is_advantaged_user"] = 0 if s.user_id not in users.keys() else 1 if len(users[s.user_id].sessions) > 2 else 0
                         q_id = "{}/{}".format(s.session_id, step)
                         qids.append(q_id)
                         examples.append({"q_id": q_id, "choice_idx":index, **features, "y":label})
@@ -277,11 +284,11 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     This function be called on both train and test sets, so that I can get both a list of unique session ids to collect later,
     and a way to access these sessions (in collect) in  O(1) time.
     """
-    assert(what in ["train","test"])
+    assert(what in ["train","test","train_hashed","test_hashed"])
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -298,9 +305,11 @@ users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which a
 
 # load in my item features --
 
+print("Loading up item features")
 if not path.exists("data/trivago/item_metadata_dense.csv"):
     import extract_hotel_features
     extract_hotel_features.main()
+
 
 hotel_features_df = pd.read_csv("data/trivago/item_metadata_dense.csv") #type:ignore
 hotel_features_df["item_id"] = hotel_features_df["item_id"].apply(str) # make sure the id is of type str, not int
@@ -310,11 +319,22 @@ d: Dict = hotel_features_df.to_dict("records")
 for h in d: # loop over the dictionary version of this df
     id_to_hotel[h["item_id"]] = Hotel(**h)
 
+"""
+Code starts here to generate features, splits, and quickly-loadable matrix files. There
+are two tasks:
+    1. make a parquet file for user-aware train/eval later
+    2. make another file to be used for a user-blind recommender. This is a little tricky because I still
+    need to know if a user belongs to a 'advantaged' or 'disadvantaged' group. Pass in a parameter to
+    feature extraction to ignore the user ?
+"""
+# part 1:
+print("Loading Session Data")
 sessions_tv = load_session_dict("train") # need to split ids by train and vali
 sessions_test = load_session_dict("test")
 session_ids_test = list(sessions_test.keys())
 
 session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED)
+
 
 print("Building user profiles") # how do I want to make user profiles?
 
@@ -332,12 +352,11 @@ for s_id in session_ids_train: # loop through sessions
         # but if it doesn't work, create a new user at that address.
         users[uid] = UserProfile(uid,[s],hotels_in_session)
 
-sids_to_data = {**sessions_tv,**sessions_test} # dangerous maybe to put train and test in the same dict?
+sids_to_data = {**sessions_tv,**sessions_test}
 
 train = collect("train",session_ids_train) # create_examples=0.1
 vali = collect("vali",session_ids_vali)
 test = collect("test",session_ids_test)
-
 
 train.data["grp"] = 0
 vali.data["grp"]  = 1
@@ -349,4 +368,25 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-print("Done!")
+print("Done. NOT Building user-blind df")
+exit(0)
+
+#session_ids_train_blind, session_ids_vali_blind = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED + 1)
+# do we want a new train/vali split?
+
+# part 2: user-blind matrix
+train_blind = collect("train",session_ids_train,is_blind=True)
+vali_blind = collect("vali",session_ids_vali,is_blind=True)
+test_blind = collect("test",session_ids_test,is_blind=True)
+
+train_blind.data["grp"] = 0
+vali_blind.data["grp"]  = 1
+test_blind.data["grp"]  = 2
+
+frames_blind: List[pd.DataFrame] = [train_blind.data, vali_blind.data, test_blind.data]
+blind_out = pd.concat(frames_blind)
+print("Writing a df with pyarrow. It has dimensions {}. ".format(blind_out.shape))
+
+# dump dataset and put my experiments in a different file
+blind_out.to_parquet("data/trivago/data_all_user_blind.parquet", engine="pyarrow")
+print("Done.")

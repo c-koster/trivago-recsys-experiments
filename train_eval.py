@@ -39,6 +39,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 
 # models --
+import lightgbm as lgb
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.base import ClassifierMixin
@@ -64,7 +65,7 @@ def safe_mean(input: List[float]) -> float:
         return 0.0
     return sum(input) / len(input)
 
-def auc(m: ClassifierMixin, X: np.ndarray, y: np.ndarray) -> float:
+def auc(m: Any, X: np.ndarray, y: np.ndarray) -> float:
     """ I've typed out these two lines 10_000 times so now it's one line """
     m_pred = m.predict_proba(X)[:, 1].ravel()
     return roc_auc_score(y_true=y, y_score=m_pred)
@@ -95,7 +96,7 @@ print("train AUC: {:3f}\nvali AUC {:3f}".format(train_auc,vali_auc),flush=True)
 
 @dataclass
 class ExperimentResult: # fancy tuple with its own print function
-    model: ClassifierMixin
+    model: Any
     params: Dict[str,str]
     # metrics
     train_auc: float
@@ -110,7 +111,7 @@ class ExperimentResult: # fancy tuple with its own print function
             print(
                 "Feature Importances:",
                 sorted(
-                    zip(feature_names, [int(1000*i) for i in self.model.feature_importances_]), key=lambda tup: tup[1], reverse=True,
+                    zip(feature_names, [i for i in self.model.feature_importances_]), key=lambda tup: tup[1], reverse=True,
                 ),
             )
         else:
@@ -145,6 +146,28 @@ def tune_RF_model() -> ExperimentResult:
 
 
     return max(experiments, key = lambda tup: tup.vali_mrr)
+
+def tune_lightgbm() -> ExperimentResult:
+    experiments: List[ExperimentResult] = []
+    for rnd in tqdm(range(n_rand)):
+        for btype in ["gbdt","rf"]:
+            params: Dict[str,str] = {
+                "boosting_type": btype,
+                "random_state": rnd,
+            }
+            m = lgb.LGBMClassifier(**params)
+            m.fit(X_train, y_train)
+
+            train_auc = auc(m,X_train,y_train)
+            vali_auc = auc(m,X_vali,y_vali)
+
+            #train_mrr = safe_mean(compute_clickout_RR(m,train))
+            vali_mrr = safe_mean(compute_clickout_RR(m,vali))
+
+            result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
+            experiments.append(result)
+
+            return max(experiments, key = lambda tup: tup.vali_mrr)
 
 def tune_MLP_model() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
@@ -185,7 +208,7 @@ def calc_RR(sorted_item_list: List[bool]) -> float:
 
 
 
-def compute_clickout_RR(model: ClassifierMixin, data: pd.DataFrame) -> List[float]:
+def compute_clickout_RR(model: Any, data: pd.DataFrame) -> List[float]:
     """
     Mean Reciprocal Rank:
     """
@@ -231,6 +254,27 @@ print("LR results on test set, split by n_sessions in a given user's profile")
 print("MRR_advantaged: {:3f}\nMRR_disadvantaged: {:3f}\nMRR_all: {:3f}\n".format(MRR_test_adv, MRR_test_disadv, MRR_test_all))
 
 
+print("Training lightGBM")
+l_gbm = tune_lightgbm()
+l_gbm.outputs()
+print("test MRR: {}".format(safe_mean(compute_clickout_RR(l_gbm.model,test))))
+l_gbm.dump("forest")
+# random forest listwise stats over the test set
+test_adv_ranks_gbm = compute_clickout_RR(l_gbm.model,test_adv)
+test_disadv_ranks_gbm = compute_clickout_RR(l_gbm.model,test_disadv)
+
+# do this so I don't evaluate the whole test set separately from the subdivided
+# test  set -- MRR takes a while to compute
+MRR_test_adv_rf = safe_mean(test_adv_ranks_gbm)
+MRR_test_disadv_rf = safe_mean(test_disadv_ranks_gbm)
+MRR_test_all_rf = safe_mean(test_adv_ranks_gbm + test_disadv_ranks_gbm)
+
+lgbm_results = {"all": MRR_test_all_rf, "adv": MRR_test_adv_rf, "dis": MRR_test_disadv_rf}
+print("\nlightGBM TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}\n\n".format(**lgbm_results))
+
+
+
+"""
 print("trying a bunch of RF models")
 rf = tune_RF_model()
 rf.outputs()
@@ -264,3 +308,4 @@ MRR_test_all_nn = safe_mean(test_adv_ranks_nn + test_disadv_ranks_nn)
 
 nn_results = {"all": MRR_test_all_nn, "adv": MRR_test_adv_nn, "dis": MRR_test_disadv_nn}
 print("\nNN TEST-SET RESULTS: \ntotal MRR: {all:3f}\nadvangaged MRR: {adv:3f}\ndisadvangaged MRR: {dis:3f}".format(**nn_results))
+"""
