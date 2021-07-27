@@ -321,7 +321,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
