@@ -30,10 +30,17 @@ RANDOM_SEED = 42
 import csv
 from os import path
 import random
+import math
 
 # matrix
 import pandas as pd
 import numpy as np
+import networkx as nx
+from networkx.algorithms import bipartite
+from networkx.algorithms import components
+
+import matplotlib.pyplot as plt
+
 
 # fancy python styling and error bars
 from typing import Dict, List, Set, Optional, Any, Tuple
@@ -49,6 +56,9 @@ def safe_mean(input: List[float]) -> float:
     if len(input) == 0:
         return 0.0
     return sum(input) / len(input)
+
+def sigmoid(x: float) -> float:
+  return 1 / (1 + math.exp(-x))
 
 def jaccard(lhs: Set[str], rhs: Set[str]) -> float:
     isect_size = sum(1 for x in lhs if x in rhs)
@@ -205,6 +215,15 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
 
     user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
 
+    dst_shortest_path: float
+    try:
+        if nx.has_path(G,current_choice_id, session.user_id):
+            dst_shortest_path = nx.shortest_path_length(G,current_choice_id, session.user_id, weight = None)
+        else:
+            dst_shortest_path = 100.0
+    except nx.NodeNotFound:
+        dst_shortest_path = 0.0
+
     features: Dict[str,Any] = { #type:ignore
         # session-based features
         "time_since_start": current_timestamp - session.start,
@@ -228,9 +247,23 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
         "unique_item_interact_by_user_avg": safe_mean(user_hotel_unique_sims),
         "unique_item_interact_by_user_max": max(user_hotel_unique_sims),
         "unique_item_interact_by_user_min": min(user_hotel_unique_sims),
+        "path_user_item": dst_shortest_path
     }
     return features
 
+
+def write_graph(session_ids: List[str]) -> nx.Graph:
+    """
+    Build a graph for collaborative filtering using a list of session ids.
+    """
+    G = nx.Graph()
+
+    sessions: List[Session] = [sids_to_data[s_id] for s_id in session_ids]
+    for s in sessions:
+        clickouts = [o for o in s.interactions if o.is_clickout]
+        G.add_edges_from([(o.action_on, s.user_id) for o in clickouts])
+
+    return G
 
 
 def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_blind: bool = False) -> SessionData:
@@ -354,6 +387,19 @@ for s_id in session_ids_train: # loop through sessions
 
 sids_to_data = {**sessions_tv,**sessions_test}
 
+
+if not path.exists("data/trivago/user_item_graph.gpickle"):
+    G = write_graph(session_ids_train)
+    nx.write_gpickle(G,"data/trivago/user_item_graph.gpickle")
+
+G = nx.read_gpickle("data/trivago/user_item_graph.gpickle")
+
+
+print("Graph stats:")
+print("Graph {} bipartite.".format("is" if bipartite.is_bipartite(G) else "not"))
+print("Connected components: {}".format(components.number_connected_components(G)))
+
+
 train = collect("train",session_ids_train) # create_examples=0.1
 vali = collect("vali",session_ids_vali)
 test = collect("test",session_ids_test)
@@ -368,8 +414,13 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-print("Done. NOT Building user-blind df")
+print("Done. NOT building a user-blind df")
 exit(0)
+
+
+# I should build blind df differently  ... directly from datafile with a 'is_advantaged_user label'
+
+
 
 #session_ids_train_blind, session_ids_vali_blind = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED + 1)
 # do we want a new train/vali split?

@@ -16,8 +16,13 @@ yield the best MRR on the validation set
 
 ---Data Shape---
 train shape: (32_717_839, 13)
- vali shape (3642791, 13)
- test shape (6_379_060, 13)
+ vali shape: (3642791, 13)
+ test shape: (6_379_060, 13)
+
+
+
+best:
+{'boosting_type': 'gbdt', 'random_state': 0}
 """
 # srun --pty /bin/bash
 

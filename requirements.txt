@@ -3,3 +3,4 @@ cornac
 pandas
 pyarrow
 lightgbm
+networkx
