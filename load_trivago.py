@@ -102,8 +102,6 @@ class Hotel:
     ctr_prob: float
 
 
-
-
 @dataclass
 class Interaction:
     timestamp: int
@@ -131,6 +129,7 @@ class Interaction:
         except ValueError:
             idx = -1
         return idx
+
 
 @dataclass(unsafe_hash=True) #TypeError: unhashable type: 'Session' -- should be fine as we don't change this ever
 class Session:
@@ -230,11 +229,11 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
     dst_shortest_path: float
     try:
         if nx.has_path(G,current_choice_id, session.user_id):
-            dst_shortest_path = nx.shortest_path_length(G,current_choice_id, session.user_id, weight = None)
+            dst_shortest_path = sigmoid(nx.shortest_path_length(G,current_choice_id, session.user_id, weight = None))
         else:
-            dst_shortest_path = 100.0
+            dst_shortest_path = sigmoid(100.0)
     except nx.NodeNotFound:
-        dst_shortest_path = 0.0
+        dst_shortest_path = -1.0
 
     features: Dict[str,Any] = { #type:ignore
         # session-based features
@@ -289,11 +288,6 @@ def make_w2v(session_ids: List[str]) -> Word2Vec:
         clickouts = [o for o in s.interactions if o.is_clickout]
         sequences += [o.impressions for o in clickouts]
 
-
-    """
-    df = pd.DataFrame({"product_seq":sequences})
-    df = df.dropna().drop_duplicates()
-    """
     n_cores = multiprocessing.cpu_count()
 
     # 1. initialise model with params
@@ -341,7 +335,6 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_
     for s in tqdm(sessions): # for each session -- --
         for step, o in enumerate(s.interactions): # for each interaction in the session
 
-
             # if it's of type "clickout", e.g. o.is_clickout
             if o.is_clickout:
                 if o.get_clicked_idx() != -1:
@@ -357,6 +350,9 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_
                         qids.append(q_id)
                         examples.append({"q_id": q_id, "choice_idx":index, **features, "y":label})
 
+                    G.add_edge(o.action_on, s.user_id) # then add the edge to the graph.. aka build it in real time.
+
+
 
     feature_names: List[str] = [i for i in features.keys()]
     return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)
@@ -371,7 +367,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -437,9 +433,15 @@ for s_id in session_ids_train: # loop through sessions
 
 sids_to_data = {**sessions_tv,**sessions_test}
 
+"""
 if not path.exists("data/trivago/user_item_graph.gpickle"):
     nx.write_gpickle(build_graph(session_ids_train),"data/trivago/user_item_graph.gpickle")
 G = nx.read_gpickle("data/trivago/user_item_graph.gpickle")
+"""
+
+# create an empty graph - nodes and edges will be built in real-time because we want to prevent crazy amounts of overfitting
+G = nx.Graph()
+
 
 #if not path.exists("data/trivago/query_sim_w2v.model"):
 make_w2v(session_ids_train).save("data/trivago/query_sim_w2v.model")
