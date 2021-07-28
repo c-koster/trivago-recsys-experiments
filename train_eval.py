@@ -106,12 +106,12 @@ class ExperimentResult: # fancy tuple with its own print function
     # metrics
     train_auc: float
     vali_auc: float
-    #mrr_train: float
+    train_mrr: float
     vali_mrr: float
 
     def outputs(self) -> None:
         print("Model params:",self.params)
-        print("Results\n-------\n train_auc: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.vali_auc,self.vali_mrr))
+        print("Results\n-------\n train_auc: {:3f}\n train_mrr: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.train_mrr,self.vali_auc,self.vali_mrr))
         if hasattr(self.model, 'feature_importances_'):
             print(
                 "Feature Importances:",
@@ -143,10 +143,10 @@ def tune_RF_model() -> ExperimentResult:
                 train_auc = auc(m,X_train,y_train)
                 vali_auc = auc(m,X_vali,y_vali)
 
-                #train_mrr = safe_mean(compute_clickout_RR(m,train))
+                train_mrr = safe_mean(compute_clickout_RR(m,train))
                 vali_mrr = safe_mean(compute_clickout_RR(m,vali))
 
-                result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
+                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
                 experiments.append(result)
 
 
@@ -166,10 +166,9 @@ def tune_lightgbm() -> ExperimentResult:
             train_auc = auc(m,X_train,y_train)
             vali_auc = auc(m,X_vali,y_vali)
 
-            #train_mrr = safe_mean(compute_clickout_RR(m,train))
+            train_mrr = safe_mean(compute_clickout_RR(m,train))
             vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-
-            result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
+            result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
             experiments.append(result)
 
             return max(experiments, key = lambda tup: tup.vali_mrr)
@@ -194,10 +193,9 @@ def tune_MLP_model() -> ExperimentResult:
                 train_auc = auc(m,X_train,y_train)
                 vali_auc = auc(m,X_vali,y_vali)
 
-                #train_mrr = safe_mean(compute_clickout_RR(m,train))
+                train_mrr = safe_mean(compute_clickout_RR(m,train))
                 vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-
-                result = ExperimentResult(m,params,train_auc,vali_auc,vali_mrr)
+                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
                 experiments.append(result)
 
     return max(experiments, key = lambda tup: tup.vali_mrr)
