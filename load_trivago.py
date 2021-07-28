@@ -31,6 +31,7 @@ import csv
 from os import path
 import random
 import math
+from time import time
 
 # matrix
 import pandas as pd
@@ -77,6 +78,16 @@ def hotel_sim(id_x: str, id_y: str) -> float:
         # fix these weird dictionary misses
         # print(id_x,id_y)
         return 0
+
+def hotel_sim_embed(id_x: str, id_y: str) -> float:
+    """
+    Look up the ids of the hotels from the dict and return their embeddding similarity
+    """
+    try:
+        sim: float = w2v_model.wv.similarity(id_x, id_y)
+        return sim
+    except KeyError:
+        return 0.0
 
 
 # First define classes to make handling data a little easier.
@@ -212,6 +223,7 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
         user_exists = False
 
     hotel_sims = [hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]
+    hotel_sims_embed = [hotel_sim_embed(current_choice_id, o.action_on) for o in prev_clickouts] if item_exists else [0]
 
     user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
 
@@ -241,6 +253,7 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
         # user-item or item-item features --
         # roll through the previous items interacted in the session and average their jaccard similarity to the current item
         "item_item_sim": safe_mean(hotel_sims),
+        "item_item_embed_sim": safe_mean(hotel_sims_embed),
         "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0,
         "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
@@ -252,7 +265,7 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
     return features
 
 
-def write_graph(session_ids: List[str]) -> nx.Graph:
+def build_graph(session_ids: List[str]) -> nx.Graph:
     """
     Build a graph for collaborative filtering using a list of session ids.
     """
@@ -264,6 +277,43 @@ def write_graph(session_ids: List[str]) -> nx.Graph:
         G.add_edges_from([(o.action_on, s.user_id) for o in clickouts])
 
     return G
+
+
+from gensim.models import Word2Vec
+import multiprocessing
+
+def make_w2v(session_ids: List[str]) -> Word2Vec:
+    sessions: List[Session] = [sids_to_data[s_id] for s_id in session_ids]
+    sequences: List[str] = []
+    for s in sessions:
+        clickouts = [o for o in s.interactions if o.is_clickout]
+        sequences += [o.impressions for o in clickouts]
+
+
+    """
+    df = pd.DataFrame({"product_seq":sequences})
+    df = df.dropna().drop_duplicates()
+    """
+    n_cores = multiprocessing.cpu_count()
+
+    # 1. initialise model with params
+    w2v_model = Word2Vec(min_count=1,
+                     window=4,
+                     vector_size=100,
+                     sample=6e-5,
+                     alpha=0.03,
+                     min_alpha=0.0007,
+                     negative=8,
+                     workers=n_cores-1)
+
+    # 2. create the vocabulary
+    w2v_model.build_vocab(sequences, progress_per=10000)
+
+    t = time()
+    w2v_model.train(sequences, total_examples=w2v_model.corpus_count, epochs=30, report_delay=1)
+    print('Time to train the model: {} mins'.format(round((time() - t) / 60, 2)))
+
+    return w2v_model
 
 
 def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_blind: bool = False) -> SessionData:
@@ -321,7 +371,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1_000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -387,17 +437,13 @@ for s_id in session_ids_train: # loop through sessions
 
 sids_to_data = {**sessions_tv,**sessions_test}
 
-
 if not path.exists("data/trivago/user_item_graph.gpickle"):
-    G = write_graph(session_ids_train)
-    nx.write_gpickle(G,"data/trivago/user_item_graph.gpickle")
-
+    nx.write_gpickle(build_graph(session_ids_train),"data/trivago/user_item_graph.gpickle")
 G = nx.read_gpickle("data/trivago/user_item_graph.gpickle")
 
-
-print("Graph stats:")
-print("Graph {} bipartite.".format("is" if bipartite.is_bipartite(G) else "not"))
-print("Connected components: {}".format(components.number_connected_components(G)))
+#if not path.exists("data/trivago/query_sim_w2v.model"):
+make_w2v(session_ids_train).save("data/trivago/query_sim_w2v.model")
+w2v_model = Word2Vec.load("data/trivago/query_sim_w2v.model")
 
 
 train = collect("train",session_ids_train) # create_examples=0.1
@@ -415,11 +461,10 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 print("Done. NOT building a user-blind df")
+
+
 exit(0)
-
-
 # I should build blind df differently  ... directly from datafile with a 'is_advantaged_user label'
-
 
 
 #session_ids_train_blind, session_ids_vali_blind = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED + 1)
