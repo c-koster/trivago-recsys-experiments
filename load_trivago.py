@@ -194,7 +194,7 @@ def create_session(df: List[Dict[str,str]]) -> Session:
     return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list)
 
 
-def extract_features(session: Session, step: int, choice_idx: int, is_blind: bool) -> Dict[str,Any]:
+def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,Any]:
     """
     Feature extraction for one session step of action type 'clicked out'
     """
@@ -217,7 +217,7 @@ def extract_features(session: Session, step: int, choice_idx: int, is_blind: boo
         #print("Key Error... {} does not exist in our dict".format(current_choice_id))
 
 
-    user_exists: bool = not is_blind
+    user_exists: bool = True
     if session.user_id not in users.keys():
         user_exists = False
 
@@ -310,7 +310,7 @@ def make_w2v(session_ids: List[str]) -> Word2Vec:
     return w2v_model
 
 
-def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_blind: bool = False) -> SessionData:
+def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> SessionData:
     """
     This function takes as input a filename and will return a SessionData object containing
     a list of clickout features, a list of labels, and methods to convert each into matrices.
@@ -344,7 +344,7 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0, is_
 
                         # feature extraction needs session, interaction info, and the index we were wondering about.
                         # we also pass whether we want to ignore user features. (defaults to false)
-                        features = extract_features(s,step,index,is_blind)
+                        features = extract_features(s,step,index)
                         features["is_advantaged_user"] = 0 if s.user_id not in users.keys() else 1 if len(users[s.user_id].sessions) > 2 else 0
                         q_id = "{}/{}".format(s.session_id, step)
                         qids.append(q_id)
@@ -464,27 +464,6 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 print("Done. NOT building a user-blind df")
 
-
-exit(0)
 # I should build blind df differently  ... directly from datafile with a 'is_advantaged_user label'
-
-
-#session_ids_train_blind, session_ids_vali_blind = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED + 1)
 # do we want a new train/vali split?
-
 # part 2: user-blind matrix
-train_blind = collect("train",session_ids_train,is_blind=True)
-vali_blind = collect("vali",session_ids_vali,is_blind=True)
-test_blind = collect("test",session_ids_test,is_blind=True)
-
-train_blind.data["grp"] = 0
-vali_blind.data["grp"]  = 1
-test_blind.data["grp"]  = 2
-
-frames_blind: List[pd.DataFrame] = [train_blind.data, vali_blind.data, test_blind.data]
-blind_out = pd.concat(frames_blind)
-print("Writing a df with pyarrow. It has dimensions {}. ".format(blind_out.shape))
-
-# dump dataset and put my experiments in a different file
-blind_out.to_parquet("data/trivago/data_all_user_blind.parquet", engine="pyarrow")
-print("Done.")
