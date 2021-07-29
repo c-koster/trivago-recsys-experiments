@@ -61,7 +61,7 @@ train = data_all[data_all.grp == 0]
 vali = data_all[data_all.grp == 1]
 test = data_all[data_all.grp == 2]
 print("split data",flush=True)
-feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx"])
+feature_names = set(data_all.columns) - set(["y", "q_id", "grp", "choice_idx","path_user_item"])
 
 
 # helpers --
