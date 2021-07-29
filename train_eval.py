@@ -78,7 +78,7 @@ def auc(m: Any, X: np.ndarray, y: np.ndarray) -> float:
 
 fscale = StandardScaler()
 X_train = fscale.fit_transform(train[feature_names])
-y_train = train["y"].array
+y_train = train["y"].to_numpy()
 print("Fit the StandardScaler",flush=True)
 
 f: ClassifierMixin = LogisticRegression()
@@ -87,11 +87,11 @@ train_auc = auc(f,X_train,y_train) # how well did I memorize the training data
 
 
 X_vali = fscale.transform(vali[feature_names])
-y_vali = vali["y"].array
+y_vali = vali["y"].to_numpy()
 vali_auc = auc(f,X_vali,y_vali)
 
 X_test = fscale.transform(test[feature_names])
-y_test = test["y"].array
+y_test = test["y"].to_numpy()
 
 
 # how well did my model learn the data
@@ -104,14 +104,12 @@ class ExperimentResult: # fancy tuple with its own print function
     model: Any
     params: Dict[str,str]
     # metrics
-    train_auc: float
-    vali_auc: float
     train_mrr: float
     vali_mrr: float
 
     def outputs(self) -> None:
         print("Model params:",self.params)
-        print("Results\n-------\n train_auc: {:3f}\n train_mrr: {:3f}\n vali_auc: {:3f}\n vali_mrr: {:3f}".format(self.train_auc,self.train_mrr,self.vali_auc,self.vali_mrr))
+        print("Results\n-------\n\ntrain_mrr: {:3f}\nvali_mrr: {:3f}".format(self.train_mrr,self.vali_mrr))
         if hasattr(self.model, 'feature_importances_'):
             print(
                 "Feature Importances:",
@@ -126,77 +124,32 @@ class ExperimentResult: # fancy tuple with its own print function
         joblib.dump(self.model, '{}.joblib'.format(filename))
 
 
-def tune_RF_model() -> ExperimentResult:
-    experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(n_rand)): # random seed loop
-        for crit in ["gini", "entropy"]:
-            for d in [4,7,11]:
-                params: Dict[str,str] = {
-                    "random_state": RANDOM_SEED + rnd,
-                    "criterion": crit,
-                    "max_depth": d,
-                    "n_estimators": 5,
-                }
-                m = RandomForestClassifier(**params)
-                m.fit(X_train, y_train)
-
-                train_auc = auc(m,X_train,y_train)
-                vali_auc = auc(m,X_vali,y_vali)
-
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
-                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
-                experiments.append(result)
-
-
-    return max(experiments, key = lambda tup: tup.vali_mrr)
-
 def tune_lightgbm() -> ExperimentResult:
     experiments: List[ExperimentResult] = []
+    qids_train = train.groupby("q_id")["q_id"].count().to_numpy()
+    qids_vali = vali.groupby("q_id")["q_id"].count().to_numpy()
+
     for rnd in tqdm(range(n_rand)):
-        for btype in ["gbdt","rf"]:
             params: Dict[str,str] = {
-                "boosting_type": btype,
+                "boosting_type": "gbdt",
+                "objective": "lambdarank",
                 "random_state": rnd,
             }
-            m = lgb.LGBMClassifier(**params)
-            m.fit(X_train, y_train)
-
-            train_auc = auc(m,X_train,y_train)
-            vali_auc = auc(m,X_vali,y_vali)
+            m = lgb.LGBMRanker(**params)
+            m.fit(
+                X=X_train,
+                y=y_train,
+                group=qids_train,
+                eval_set=[(X_vali, y_vali)],
+                eval_group=[qids_vali],
+                verbose=False,
+                eval_at=10,
+            )
 
             train_mrr = safe_mean(compute_clickout_RR(m,train))
             vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-            result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
+            result = ExperimentResult(m,params,train_mrr,vali_mrr)
             experiments.append(result)
-
-            return max(experiments, key = lambda tup: tup.vali_mrr)
-
-def tune_MLP_model() -> ExperimentResult:
-    experiments: List[ExperimentResult] = []
-    for rnd in tqdm(range(n_rand)): # random seed loop
-        for layer in [(32,), (16,16,)]:
-            for activation in ['logistic','relu']:
-                params: Dict[str,str] = {
-                    "hidden_layer_sizes": layer,
-                    "random_state": RANDOM_SEED + rnd,
-                    "activation":activation,
-                    "solver": "lbfgs",
-                    "max_iter": 1e4,
-                    "alpha": 0.0001,
-                }
-                m = MLPClassifier(**params)
-
-                m.fit(X_train, y_train)
-
-                train_auc = auc(m,X_train,y_train)
-                vali_auc = auc(m,X_vali,y_vali)
-
-                train_mrr = safe_mean(compute_clickout_RR(m,train))
-                vali_mrr = safe_mean(compute_clickout_RR(m,vali))
-                result = ExperimentResult(m,params,train_auc,vali_auc,train_mrr,vali_mrr)
-                experiments.append(result)
 
     return max(experiments, key = lambda tup: tup.vali_mrr)
 
@@ -227,7 +180,7 @@ def compute_clickout_RR(model: Any, data: pd.DataFrame) -> List[float]:
             continue
 
         # this outputs two values -- we want the probability of the second class (found at each row of  index 1 in this matrix)
-        qid_scores = model.predict_proba(X_qid)[:,1].ravel()
+        qid_scores = model.predict(X_qid).ravel()
 
         # predict on features X and re-sort the items.. return a sorted list of item ids
         impressions_shuffled = [i[0] for i in sorted(zip(y_qid, qid_scores), key=lambda tup: tup[1],reverse=True)]
