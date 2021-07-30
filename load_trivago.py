@@ -131,29 +131,57 @@ class Interaction:
         return idx
 
 
-@dataclass(unsafe_hash=True) #TypeError: unhashable type: 'Session' -- should be fine as we don't change this ever
+@dataclass(unsafe_hash=True) #TypeError: unhashable type: 'Session' just don't use me as a key
 class Session:
     start: int
     user_id: str
     session_id: str
     interactions: List[Interaction]
 
+
     def set_user_id(self,num: int) -> "Session":
         """
-        Better to
+        This helps us with the *extra training data* strategy where we want copies of
+        our session data which don't align with user profiles -- to prevent over-learning
+        user-based features while training.
         """
         new_user_id: str = self.user_id + "abc" + str(num)
         new_session_id: str = self.session_id + "abc" + str(num)
         new_session: Session = Session(self.start,new_user_id,new_session_id,self.interactions)
         return new_session
 
+    def append_interaction(self, o: Interaction) -> None:
+        """ helper """
+        self.interactions.append(o)
 
-@dataclass
+
+# makes less sense to make a dataclass here because user profiles change often
 class UserProfile:
-    user_id: str
-    sessions: List[Session]
-    unique_interactions: Set[str]
 
+    def __init__(self, id: str):
+        self.user_id = id
+        self.sessions: Dict[str,Session] = {}
+        self.unique_interactions: Set[str] = set([])
+
+    def update(self, session_id: str, interaction: Interaction) ->  None:
+        """
+        Update a user profile requires two things.
+
+        - First: add the reference (action_on) string to the unique_interactions set.
+
+        - Second: find the session which the interaction belongs to and append it. If it doesn't
+            exist make a new session with the interaction as the first entry
+        """
+        if interaction.action_on != "":
+            self.unique_interactions.add(interaction.action_on)
+
+        s: Session
+        try:
+            s = self.sessions[session_id] # try to find the session
+            s.append_interaction(interaction)
+        except KeyError:
+            # but if it doesn't work, create a new user at that address.
+            self.sessions[session_id] = Session(interaction.timestamp, self.user_id,session_id,[interaction])
 
 # this one is a wrapper for training and test data types
 @dataclass
