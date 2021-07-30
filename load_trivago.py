@@ -253,6 +253,8 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
     hotel_sims_embed = [hotel_sim_embed(current_choice_id, o.action_on) for o in prev_clickouts] if item_exists else [0]
 
     user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
+    user_hotel_unique_sims_embed = [hotel_sim_embed(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
+
 
     dst_shortest_path: float
     try:
@@ -285,6 +287,7 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
         "unique_item_interact_by_user_avg": safe_mean(user_hotel_unique_sims),
+        "unique_item_interact_by_user_embed_avg": safe_mean(user_hotel_unique_sims_embed),
         "unique_item_interact_by_user_max": max(user_hotel_unique_sims),
         "unique_item_interact_by_user_min": min(user_hotel_unique_sims),
         "path_user_item": dst_shortest_path
@@ -380,6 +383,16 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
 
                     G.add_edge(o.action_on, s.user_id) # then add the edge to the graph.. aka build it in real time.
 
+            # try to add each interaction to a user profile
+            uid = s.user_id # (use this many times)
+            user: UserProfile
+            try:
+                user = users[uid]
+            except KeyError:
+                # but if it doesn't work, create a new user at that address.
+                user = UserProfile(uid)
+                users[uid]= user
+            user.update(s.session_id, o)
 
 
     feature_names: List[str] = [i for i in features.keys()]
@@ -409,6 +422,9 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 # globals
 id_to_hotel: Dict[str,Hotel] = {}
 users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
+# create an empty graph - nodes and edges will be built in real-time because we want to prevent crazy amounts of overfitting
+G = nx.Graph()
+
 
 # load in my item features --
 
@@ -443,22 +459,6 @@ session_ids_test = list(sessions_test.keys())
 session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED)
 
 
-print("Building user profiles") # how do I want to make user profiles?
-
-s_id: str
-for s_id in session_ids_train: # loop through sessions
-    s: Session = sessions_tv[s_id]
-    # try to add each session to session.user_id
-    hotels_in_session: Set[str] = set([o.action_on for o in s.interactions if o.action_on != "nan"])
-
-    uid = s.user_id # (use this many times)
-    try:
-        users[uid].sessions.append(s) # try to add the session
-        users[uid].unique_interactions.update(hotels_in_session)
-    except KeyError:
-        # but if it doesn't work, create a new user at that address.
-        users[uid] = UserProfile(uid,[s],hotels_in_session)
-
 sids_to_data = {**sessions_tv,**sessions_test}
 
 """
@@ -467,8 +467,7 @@ if not path.exists("data/trivago/user_item_graph.gpickle"):
 G = nx.read_gpickle("data/trivago/user_item_graph.gpickle")
 """
 
-# create an empty graph - nodes and edges will be built in real-time because we want to prevent crazy amounts of overfitting
-G = nx.Graph()
+
 
 
 #if not path.exists("data/trivago/query_sim_w2v.model"):
@@ -491,6 +490,12 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 print("Done. NOT building a user-blind df")
+
+
+# quick sanity check: is the number of interactions over ALL sessions equal to
+# the number of interactions in all user profiles by the end of feature generation?
+
+
 
 # I should build blind df differently  ... directly from datafile with a 'is_advantaged_user label'
 # do we want a new train/vali split?
