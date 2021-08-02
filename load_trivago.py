@@ -408,7 +408,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1000) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -461,17 +461,9 @@ session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),
 
 sids_to_data = {**sessions_tv,**sessions_test}
 
-"""
-if not path.exists("data/trivago/user_item_graph.gpickle"):
-    nx.write_gpickle(build_graph(session_ids_train),"data/trivago/user_item_graph.gpickle")
-G = nx.read_gpickle("data/trivago/user_item_graph.gpickle")
-"""
-
-
-
-
-#if not path.exists("data/trivago/query_sim_w2v.model"):
-make_w2v(session_ids_train).save("data/trivago/query_sim_w2v.model")
+# get w2v
+if not path.exists("data/trivago/query_sim_w2v.model"):
+    make_w2v(session_ids_train).save("data/trivago/query_sim_w2v.model")
 w2v_model = Word2Vec.load("data/trivago/query_sim_w2v.model")
 
 
@@ -489,8 +481,7 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-print("Done. NOT building a user-blind df")
-
+print(df_out.columns)
 
 # quick sanity check: is the number of interactions over ALL sessions equal to
 # the number of interactions in all user profiles by the end of feature generation?
