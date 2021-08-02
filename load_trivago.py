@@ -403,11 +403,10 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     This function be called on both train and test sets, so that I can get both a list of unique session ids to collect later,
     and a way to access these sessions (in collect) in  O(1) time.
     """
-    assert(what in ["train","test","train_hashed","test_hashed"])
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what),nrows=1000) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -452,7 +451,7 @@ are two tasks:
 # part 1:
 print("Loading Session Data")
 sessions_tv = load_session_dict("train") # need to split ids by train and vali
-sessions_test = load_session_dict("test")
+sessions_test = load_session_dict("test_ground_truth")
 session_ids_test = list(sessions_test.keys())
 
 session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED)
@@ -480,7 +479,6 @@ print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
 df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
-print(df_out.columns)
 
 # quick sanity check: is the number of interactions over ALL sessions equal to
 # the number of interactions in all user profiles by the end of feature generation?
