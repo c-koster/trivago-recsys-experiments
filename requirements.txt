@@ -5,3 +5,4 @@ pyarrow
 lightgbm
 networkx
 gensim
+trvrecsys2019/*

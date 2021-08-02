@@ -16,7 +16,6 @@ import pandas as pd
 
 counts = pd.read_csv("data/trivago/train.csv")
 sessions = counts.groupby("user_id")["session_id"].nunique().to_frame(name="nsessions")
-print(sessions)
 
 def hash_session(id: str) -> str:
     """ Input a session id and perform md5, then return a string of the hex digest. """

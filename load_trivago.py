@@ -394,7 +394,6 @@ def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> 
                 users[uid]= user
             user.update(s.session_id, o)
 
-
     feature_names: List[str] = [i for i in features.keys()]
     return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)
 

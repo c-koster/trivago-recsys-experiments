@@ -2,3 +2,4 @@ papers*
 data*
 explo_movielens.py
 *.joblib
+trvrecsys2019/*
