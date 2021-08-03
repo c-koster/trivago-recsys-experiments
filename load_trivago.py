@@ -341,19 +341,12 @@ def make_w2v(session_ids: List[str]) -> Word2Vec:
     return w2v_model
 
 
-def collect(what: str, session_ids: List[str], create_examples: float = 0.0) -> SessionData:
+def collect(what: str, session_ids: List[str]) -> SessionData:
     """
     This function takes as input a filename and will return a SessionData object containing
     a list of clickout features, a list of labels, and methods to convert each into matrices.
     """
     sessions: List[Session] = [sids_to_data[s_id] for s_id in session_ids]
-
-    if create_examples > 0: # TODO create examples is presently broken
-
-        # add another session where we scramble the user ID so the model doesn't overfit
-        sessions_duplicates, _ = train_test_split(sessions,train_size=0.1,random_state=RANDOM_SEED)
-        [sessions.append(s_dup.set_user_id(num)) for num, s_dup in enumerate(sessions_duplicates)]
-        print("added {} duplicates to our training data to prevent overfitting".format(len(sessions_duplicates)))
 
     print("Rolling through ({}) sessions/creating labeled feature vectors for {} sessions".format(len(sessions), what))
 
@@ -450,14 +443,15 @@ are two tasks:
 """
 # part 1:
 print("Loading Session Data")
-sessions_tv = load_session_dict("train") # need to split ids by train and vali
-sessions_test = load_session_dict("test_ground_truth")
+sessions_train = load_session_dict("train")
+sessions_vali = load_session_dict("validation")
+sessions_test = load_session_dict("confirmation")
+
+session_ids_train = list(sessions_train.keys())
+session_ids_vali = list(sessions_vali.keys())
 session_ids_test = list(sessions_test.keys())
 
-session_ids_train, session_ids_vali = train_test_split(list(sessions_tv.keys()),train_size=0.9,random_state=RANDOM_SEED)
-
-
-sids_to_data = {**sessions_tv,**sessions_test}
+sids_to_data = {**sessions_train, **sessions_vali,**sessions_test}
 
 # get w2v
 if not path.exists("data/trivago/query_sim_w2v.model"):
@@ -465,15 +459,19 @@ if not path.exists("data/trivago/query_sim_w2v.model"):
 w2v_model = Word2Vec.load("data/trivago/query_sim_w2v.model")
 
 
-train = collect("train",session_ids_train) # create_examples=0.1
-vali = collect("vali",session_ids_vali)
-test = collect("test",session_ids_test)
+train = collect("train",session_ids_train)
+session_ids_vali_test = session_ids_test + session_ids_vali
+session_ids_vali_test.sort(key=lambda x: sids_to_data[x].start)
+valitest = collect("vali/test", session_ids_vali_test)
+#test = collect("test", session_ids_test)
 
 train.data["grp"] = 0
-vali.data["grp"]  = 1
-test.data["grp"]  = 2
+vali_or_test = lambda x: 2 if x.split("/")[0] in session_ids_test else 1
+valitest.data["grp"] = valitest.data["q_id"].apply(vali_or_test)
+#test.data["grp"]  = 2
 
-frames: List[pd.DataFrame] = [train.data, vali.data, test.data]
+
+frames: List[pd.DataFrame] = [train.data, valitest.data]
 df_out = pd.concat(frames)
 print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
@@ -484,7 +482,5 @@ df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
 # the number of interactions in all user profiles by the end of feature generation?
 
 
-
 # I should build blind df differently  ... directly from datafile with a 'is_advantaged_user label'
 # do we want a new train/vali split?
-# part 2: user-blind matrix
