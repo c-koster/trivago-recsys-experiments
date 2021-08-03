@@ -22,8 +22,6 @@ Extract labels and features as follows:
     - roll through each session
 
 """
-global err_count
-err_count = 0
 RANDOM_SEED = 42
 
 #basic
@@ -49,7 +47,6 @@ from tqdm import tqdm
 
 from dataclasses import dataclass
 
-from sklearn.model_selection import train_test_split
 
 
 # helpers --
@@ -209,10 +206,7 @@ def create_session(df: List[Dict[str,str]]) -> Session:
         i: Interaction
         is_clickout = ("clickout item" == d["action_type"])
         t = int(d["timestamp"])#datetime.fromtimestamp(int(d["timestamp"]))
-        global err_count
         if is_clickout:
-            if type(d["reference"]) == type(1.0): #  meaning that there is a clickout but it is a NaN. don't know whow to interpret this TODO
-                err_count +=1
             i = Interaction(t,d["action_type"], str(d["reference"]),
             is_clickout, d["impressions"].split("|"), [float(i) for i in d["prices"].split("|")])
         else:
