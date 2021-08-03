@@ -33,11 +33,13 @@ def convert_file(what: str) -> None:
     2. over-write the user id with a hash of te session id, so each session appears
         to be from a unique user
     """
-    assert what in ["train","test"]
+    assert what in ["train","test","validation","confirmation"]
     df = pd.read_csv("data/trivago/{}.csv".format(what))
     df = pd.merge(df,sessions,how='left',left_on="user_id",right_index=True)
+    df["nsessions"] = df["nsessions"].fillna(0).astype(int)
     df["user_id"] = df["session_id"].apply(hash_session)
     df.to_csv("data/trivago/{}_hashed.csv".format(what),index=False)
 
 convert_file("train")
-convert_file("test")
+convert_file("validation")
+convert_file("confirmation")

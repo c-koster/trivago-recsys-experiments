@@ -113,6 +113,7 @@ class Session:
     user_id: str
     session_id: str
     interactions: List[Interaction]
+    is_advantaged_user: bool
 
 
     def set_user_id(self,num: int) -> "Session":
@@ -132,32 +133,10 @@ class Session:
 
 
 # makes less sense to make a dataclass here because user profiles change often
-class UserProfile:
-
-    def __init__(self, id: str):
-        self.user_id = id
-        self.sessions: Dict[str,Session] = {}
-        self.unique_interactions: Set[str] = set([])
-
-    def update(self, session_id: str, interaction: Interaction) ->  None:
-        """
-        Update a user profile requires two things.
-
-        - First: add the reference (action_on) string to the unique_interactions set.
-
-        - Second: find the session which the interaction belongs to and append it. If it doesn't
-            exist make a new session with the interaction as the first entry
-        """
-        if interaction.action_on != "":
-            self.unique_interactions.add(interaction.action_on)
-
-        s: Session
-        try:
-            s = self.sessions[session_id] # try to find the session
-            s.append_interaction(interaction)
-        except KeyError:
-            # but if it doesn't work, create a new user at that address.
-            self.sessions[session_id] = Session(interaction.timestamp, self.user_id,session_id,[interaction])
+"""
+First rework goes here -- I no longer have user profiles so this "user profile" object can be removed completely.
+Using session.interactions[:step] has the same effect of updating features continuously in real time.
+"""
 
 # this one is a wrapper for training and test data types
 @dataclass
@@ -192,7 +171,9 @@ def create_session(df: List[Dict[str,str]]) -> Session:
             i = Interaction(t,d["action_type"],str(d["reference"]),is_clickout,[],[])
 
         interaction_list.append(i)
-    return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list)
+
+    # a person is an advantaged user if they had more than 2 sessions in the training set
+    return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list,(df[0]["nsessions"] > 2))
 
 
 def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,Any]:
@@ -218,15 +199,8 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         #print("Key Error... {} does not exist in our dict".format(current_choice_id))
 
 
-    user_exists: bool = True
-    if session.user_id not in users.keys():
-        user_exists = False
-
     hotel_sims = [hotel_sim(current_choice_id, o.action_on) for o in session.interactions[:step] if o.action_on.isnumeric()]
     hotel_sims_embed = [hotel_sim_embed(current_choice_id, o.action_on) for o in prev_clickouts] if item_exists else [0]
-
-    user_hotel_unique_sims = [hotel_sim(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
-    user_hotel_unique_sims_embed = [hotel_sim_embed(current_choice_id, hotel_id) for hotel_id in users[session.user_id].unique_interactions] if user_exists else [0]
 
 
     dst_shortest_path: float
@@ -259,10 +233,6 @@ def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,A
         "item_ctr": id_to_hotel[current_choice_id].ctr if item_exists else 0,
         "item_ctr_prob": id_to_hotel[current_choice_id].ctr_prob if item_exists else 0,
         # user-based features (these build on previous sessions or in conjunction with current sessions) --
-        "unique_item_interact_by_user_avg": safe_mean(user_hotel_unique_sims),
-        "unique_item_interact_by_user_embed_avg": safe_mean(user_hotel_unique_sims_embed),
-        "unique_item_interact_by_user_max": max(user_hotel_unique_sims),
-        "unique_item_interact_by_user_min": min(user_hotel_unique_sims),
         "path_user_item": dst_shortest_path
     }
     return features
@@ -342,23 +312,14 @@ def collect(what: str, session_ids: List[str]) -> SessionData:
                         # feature extraction needs session, interaction info, and the index we were wondering about.
                         # we also pass whether we want to ignore user features. (defaults to false)
                         features = extract_features(s,step,index)
-                        features["is_advantaged_user"] = 0 if s.user_id not in users.keys() else 1 if len(users[s.user_id].sessions) > 2 else 0
+                        features["is_advantaged_user"] = 1 if s.is_advantaged_user else 0
+                        #1 if len(users[s.user_id].sessions) > 2 else 0
                         q_id = "{}/{}".format(s.session_id, step)
                         qids.append(q_id)
                         examples.append({"q_id": q_id, "choice_idx":index, **features, "y":label})
 
                     G.add_edge(o.action_on, s.user_id) # then add the edge to the graph.. aka build it in real time.
 
-            # try to add each interaction to a user profile
-            uid = s.user_id # (use this many times)
-            user: UserProfile
-            try:
-                user = users[uid]
-            except KeyError:
-                # but if it doesn't work, create a new user at that address.
-                user = UserProfile(uid)
-                users[uid]= user
-            user.update(s.session_id, o)
 
     feature_names: List[str] = [i for i in features.keys()]
     return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)
@@ -372,7 +333,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
-    df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    df_interactions = pd.read_csv("data/trivago/{}_hashed.csv".format(what)) #type:ignore
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
@@ -385,7 +346,6 @@ def load_session_dict(what: str) -> Dict[str,Session]:
 
 # globals
 id_to_hotel: Dict[str,Hotel] = {}
-users: Dict[str,UserProfile] = {} # this map ids to UserProfile objects (which are just sets of sessions)
 # create an empty graph - nodes and edges will be built in real-time because we want to prevent crazy amounts of overfitting
 G = nx.Graph()
 
@@ -449,7 +409,7 @@ df_out = pd.concat(frames)
 print("Writing a df with pyarrow. It has dimensions {}. ".format(df_out.shape))
 
 # dump dataset and put my experiments in a different file
-df_out.to_parquet("data/trivago/data_all.parquet", engine="pyarrow")
+df_out.to_parquet("data/trivago/data_all_user_blind.parquet", engine="pyarrow")
 
 # quick sanity check: is the number of interactions over ALL sessions equal to
 # the number of interactions in all user profiles by the end of feature generation?

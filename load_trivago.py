@@ -48,7 +48,6 @@ from tqdm import tqdm
 from dataclasses import dataclass
 
 
-
 # helpers --
 def safe_mean(input: List[float]) -> float:
     if len(input) == 0:
