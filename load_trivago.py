@@ -160,7 +160,7 @@ class UserProfile:
         self.sessions: Dict[str,Session] = {}
         self.unique_interactions: Set[str] = set([])
 
-    def update(self, session_id: str, interaction: Interaction) ->  None:
+    def update(self, session_id: str, interaction: Interaction, is_advantaged_user: bool) ->  None:
         """
         Update a user profile requires two things.
 
@@ -178,7 +178,7 @@ class UserProfile:
             s.append_interaction(interaction)
         except KeyError:
             # but if it doesn't work, create a new user at that address.
-            self.sessions[session_id] = Session(interaction.timestamp, self.user_id,session_id,[interaction])
+            self.sessions[session_id] = Session(interaction.timestamp, self.user_id,session_id,[interaction],is_advantaged_user)
 
 # this one is a wrapper for training and test data types
 @dataclass
@@ -379,7 +379,7 @@ def collect(what: str, session_ids: List[str]) -> SessionData:
                 # but if it doesn't work, create a new user at that address.
                 user = UserProfile(uid)
                 users[uid]= user
-            user.update(s.session_id, o)
+            user.update(s.session_id, o, s.is_advantaged_user)
 
     feature_names: List[str] = [i for i in features.keys()]
     return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)

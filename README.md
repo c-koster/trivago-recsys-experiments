@@ -31,16 +31,16 @@ This script creates a readable parquet file which contains all the data which is
 Following LogicAI's 2019 recsys strategy, I computed user features on a rolling basis to prevent overfitting. Particularly, I sorted sessions by their starting timestamp, and added each interaction to a user profile and graph only after features had been extracted from that interaction.
 
 ### compute_ctr.py
-
+This script computes the click-through ratios (CTRs) for all items.
 
 ### extract_hotel_features.py
+Construct hotel (item-based) features for learning.
 
 ### hash_user_id.py
-
+We are interested in knowing what happens when we pretend that all users are new visitors to the site. We can't just null out the user based features because we use a graph based model as one of our features, which still may be a useful features even if edges only occur between sessions and items (rather than users and items).
 
 ### load_trivago_blind.py
 This script would remarkably similar to the above, but it excludes user profiles and computes fewer features. It also constructs a user-item graph as a ~session-item~ graph instead, which is more sparse.
-
 
 
 ## Future work/stuff I didn't cover this summer.
