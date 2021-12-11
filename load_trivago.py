@@ -133,6 +133,7 @@ class Session:
     user_id: str
     session_id: str
     interactions: List[Interaction]
+    is_advantaged_user: bool
 
 
     def set_user_id(self,num: int) -> "Session":
@@ -212,7 +213,7 @@ def create_session(df: List[Dict[str,str]]) -> Session:
             i = Interaction(t,d["action_type"],str(d["reference"]),is_clickout,[],[])
 
         interaction_list.append(i)
-    return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list)
+    return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list,(df[0]["nsessions"] > 2))
 
 
 def extract_features(session: Session, step: int, choice_idx: int) -> Dict[str,Any]:
@@ -362,7 +363,7 @@ def collect(what: str, session_ids: List[str]) -> SessionData:
                         # feature extraction needs session, interaction info, and the index we were wondering about.
                         # we also pass whether we want to ignore user features. (defaults to false)
                         features = extract_features(s,step,index)
-                        features["is_advantaged_user"] = 0 if s.user_id not in users.keys() else 1 if len(users[s.user_id].sessions) > 2 else 0
+                        features["is_advantaged_user"] = 0 if s.is_advantaged_user else 0
                         q_id = "{}/{}".format(s.session_id, step)
                         qids.append(q_id)
                         examples.append({"q_id": q_id, "choice_idx":index, **features, "y":label})
@@ -384,6 +385,7 @@ def collect(what: str, session_ids: List[str]) -> SessionData:
     return SessionData(pd.DataFrame.from_records(examples), qids, feature_names)
 
 
+nsessions_counts: pd.DataFrame
 def load_session_dict(what: str) -> Dict[str,Session]:
     """
     This function be called on both train and test sets, so that I can get both a list of unique session ids to collect later,
@@ -393,6 +395,12 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     sessions: List[Session] = []
     # nrows=1_000 for my laptop's sake
     df_interactions = pd.read_csv("data/trivago/{}.csv".format(what)) #type:ignore
+    global nsessions_counts
+    if what == "train":
+        nsessions_counts = df_interactions.groupby("user_id")["session_id"].nunique().to_frame(name="nsessions")
+
+    df_interactions["nsessions"] = nsessions_counts["nsessions"].fillna(0).astype(int)
+
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
     A = lambda x: sessions.append(create_session(x.to_dict("records"))) #type:ignore
