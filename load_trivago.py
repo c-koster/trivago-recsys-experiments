@@ -213,6 +213,9 @@ def create_session(df: List[Dict[str,str]]) -> Session:
             i = Interaction(t,d["action_type"],str(d["reference"]),is_clickout,[],[])
 
         interaction_list.append(i)
+
+    # whenn creating the session we can index the 0'th interaction as they should all have the same user
+    # session id, and aggregated nsessions
     return Session(interaction_list[0].timestamp,df[0]["user_id"],df[0]["session_id"],interaction_list,(df[0]["nsessions"] > 2))
 
 
@@ -399,7 +402,9 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     if what == "train":
         nsessions_counts = df_interactions.groupby("user_id")["session_id"].nunique().to_frame(name="nsessions")
 
-    df_interactions["nsessions"] = nsessions_counts["nsessions"].fillna(0).astype(int)
+    df_interactions = pd.merge(df_innteractions,nsessions_counts,how='left',left_on="user_id",right_index=True)
+
+    df_interactions["nsessions"] = df_interactions["nsessions"].fillna(0).astype(int)
 
     # appply the "save_session" function to each grouped item/session
     # but first turn each group from a df into a list of dictionaries
