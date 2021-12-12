@@ -402,7 +402,7 @@ def load_session_dict(what: str) -> Dict[str,Session]:
     if what == "train":
         nsessions_counts = df_interactions.groupby("user_id")["session_id"].nunique().to_frame(name="nsessions")
 
-    df_interactions = pd.merge(df_innteractions,nsessions_counts,how='left',left_on="user_id",right_index=True)
+    df_interactions = pd.merge(df_interactions,nsessions_counts,how='left',left_on="user_id",right_index=True)
 
     df_interactions["nsessions"] = df_interactions["nsessions"].fillna(0).astype(int)
 
